@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/neon/server"
 
+export const dynamic = "force-dynamic"
+
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
 }

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/neon/server"
 
+export const dynamic = "force-dynamic"
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -47,7 +49,7 @@ export async function GET(request: Request) {
         // Export as CSV
         const csv = [
           "التاريخ,الوقت,النوع,المرسل,الرسالة,نوع الرسالة",
-          ...messages.rows.map((msg: any) => {
+          ...messages.map((msg: any) => {
             const date = new Date(
               typeof msg.timestamp === "number" ? msg.timestamp * 1000 : msg.created_at,
             ).toLocaleString("ar-SA")
@@ -70,7 +72,7 @@ export async function GET(request: Request) {
         return NextResponse.json(
           {
             phone,
-            messages: messages.rows,
+            messages,
             exported_at: new Date().toISOString(),
           },
           {
@@ -112,7 +114,7 @@ export async function GET(request: Request) {
       if (format === "csv") {
         const csv = [
           "التاريخ,الوقت,النوع,الرقم,الاسم,الرسالة,نوع الرسالة",
-          ...allMessages.rows.map((msg: any) => {
+          ...allMessages.map((msg: any) => {
             const date = new Date(
               typeof msg.timestamp === "number" ? msg.timestamp * 1000 : msg.created_at,
             ).toLocaleString("ar-SA")
@@ -134,8 +136,8 @@ export async function GET(request: Request) {
       } else {
         return NextResponse.json(
           {
-            messages: allMessages.rows,
-            total: allMessages.rows.length,
+            messages: allMessages,
+            total: allMessages.length,
             exported_at: new Date().toISOString(),
           },
           {

@@ -144,44 +144,52 @@ export async function POST(request: Request) {
                 mediaUrl = await fetchMediaAsDataUrl(mediaId, accessToken)
               }
 
-              let messageText = message.text?.body || null
+              let messageText = ""
               let messageType = message.type
+              let buttonPayload: string | null = null
 
-              if (message.type === "interactive") {
+              // Extract message text based on message type
+              if (message.type === "text") {
+                // Plain text message
+                messageText = message.text?.body || ""
+                console.log("[v0] Text message detected:", messageText)
+              } else if (message.type === "button") {
+                // Template button reply
+                messageText = message.button?.text || message.button?.payload || "زر"
+                buttonPayload = message.button?.payload || null
+                messageType = "button_reply"
+                console.log("[v0] Button message detected:", messageText, "Payload:", buttonPayload)
+              } else if (message.type === "interactive") {
+                // Interactive message (button_reply or list_reply)
                 console.log("[v0] Interactive message detected!")
+                console.log("[v0] Interactive type:", message.interactive?.type)
                 console.log("[v0] Interactive object:", JSON.stringify(message.interactive, null, 2))
 
-                if (message.interactive?.type === "button_reply") {
-                  console.log("[v0] Button reply detected!")
-                  console.log("[v0] Button reply object:", JSON.stringify(message.interactive.button_reply, null, 2))
-
+                if (message.interactive?.button_reply) {
+                  // Interactive button reply
                   messageText =
-                    message.interactive.button_reply.title ||
-                    message.interactive.button_reply.text ||
-                    message.interactive.button_reply.payload ||
-                    "رد سريع"
-
+                    message.interactive.button_reply.title || message.interactive.button_reply.text || "رد سريع"
+                  buttonPayload =
+                    message.interactive.button_reply.id || message.interactive.button_reply.payload || null
                   messageType = "button_reply"
-                  console.log("[v0] ✅ Button reply text extracted:", messageText)
-                } else if (message.interactive?.type === "list_reply") {
-                  console.log("[v0] List reply detected!")
+                  console.log("[v0] Button reply detected:", messageText, "Payload:", buttonPayload)
+                } else if (message.interactive?.list_reply) {
+                  // Interactive list reply
                   messageText =
                     message.interactive.list_reply.title || message.interactive.list_reply.description || "رد من قائمة"
+                  buttonPayload = message.interactive.list_reply.id || null
                   messageType = "list_reply"
-                  console.log("[v0] ✅ List reply text extracted:", messageText)
+                  console.log("[v0] List reply detected:", messageText, "ID:", buttonPayload)
                 }
-              }
-
-              if (message.type === "button") {
-                console.log("[v0] Button message detected!")
-                console.log("[v0] Button object:", JSON.stringify(message.button, null, 2))
-                messageText = message.button?.text || message.button?.payload || "زر"
-                messageType = "button_reply"
-                console.log("[v0] ✅ Button text extracted:", messageText)
+              } else if (message.type === "image" || message.type === "video" || message.type === "document") {
+                // Media message with optional caption
+                messageText = message.image?.caption || message.video?.caption || message.document?.caption || ""
+                console.log("[v0] Media message detected with caption:", messageText)
               }
 
               console.log("[v0] Final message text:", messageText)
               console.log("[v0] Final message type:", messageType)
+              console.log("[v0] Button payload:", buttonPayload)
               console.log("[v0] ===== End Processing Message =====")
 
               const messageData = {
@@ -228,7 +236,6 @@ export async function POST(request: Request) {
                       last_message_is_outgoing: false,
                       unread_count: (existingConv.unread_count || 0) + 1,
                       has_incoming_messages: true,
-                      updated_at: new Date().toISOString(),
                     })
                     .eq("phone_number", normalizedPhone)
                 } else {
