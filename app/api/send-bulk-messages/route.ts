@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
-import { createClient } from "@/lib/supabase/server"
+import { createClient } from "@/lib/neon/server"
 
 function normalizePhoneNumber(phone: string): string {
   const cleaned = phone.replace(/\D/g, "")
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing template ID", success: false }, { status: 400 })
     }
 
-    const supabase = await createClient()
+    const neonClient = await createClient()
 
     console.log("[v0] جاري فحص حدود الإرسال من Meta...")
     const rateLimitsResponse = await fetch(`${request.url.split("/api/")[0]}/api/meta-rate-limits`)
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
     }
 
     console.log("[v0] جاري جلب إعدادات API...")
-    const { data: settingsData, error: settingsError } = await supabase.from("api_settings").select("*").limit(1)
+    const { data: settingsData, error: settingsError } = await neonClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (settingsError || !settings) {
@@ -246,7 +246,7 @@ export async function POST(request: Request) {
           results.push({ phoneNumber, success: true, messageId })
           successCount++
 
-          await supabase.from("message_history").insert({
+          await neonClient.from("message_history").insert({
             message_id: messageId,
             to_number: normalizedPhone,
             template_name: template.name,
@@ -273,7 +273,7 @@ export async function POST(request: Request) {
           results.push({ phoneNumber, success: false, error: error.error?.message })
           failureCount++
 
-          await supabase.from("message_history").insert({
+          await neonClient.from("message_history").insert({
             to_number: normalizedPhone,
             template_name: template.name,
             message_text: templateBodyText,

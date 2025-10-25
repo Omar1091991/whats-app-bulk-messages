@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { createClient } from "@/lib/neon/server"
 import { type NextRequest, NextResponse } from "next/server"
 
 // Helper function to normalize phone numbers

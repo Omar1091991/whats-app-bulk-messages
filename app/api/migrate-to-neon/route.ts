@@ -2,16 +2,28 @@ import { NextResponse } from "next/server"
 import { Pool } from "@neondatabase/serverless"
 import { createClient } from "@supabase/supabase-js"
 
+let migrationInProgress = false
+
 export async function GET() {
-  // Automatically trigger migration when accessed via browser
   return POST()
 }
 
 export async function POST() {
+  if (migrationInProgress) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Migration is already in progress. Please wait for it to complete.",
+      },
+      { status: 409 },
+    )
+  }
+
+  migrationInProgress = true
+
   try {
     console.log("[v0] Starting migration from Supabase to Neon...")
 
-    // Connect to Neon
     const neonConnectionString =
       process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.NEON_POSTGRES_URL
 
@@ -20,9 +32,9 @@ export async function POST() {
     }
 
     const neonPool = new Pool({ connectionString: neonConnectionString })
+    const neonClient = await neonPool.connect()
     console.log("[v0] Connected to Neon")
 
-    // Connect to Supabase
     const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 
@@ -34,23 +46,23 @@ export async function POST() {
     console.log("[v0] Connected to Supabase")
 
     console.log("[v0] Dropping existing tables...")
+    const tablesToDrop = [
+      "webhook_messages",
+      "uploaded_media",
+      "scheduled_messages",
+      "message_history",
+      "daily_statistics",
+      "api_settings",
+    ]
 
-    const dropTablesSQL = `
-      DROP TABLE IF EXISTS webhook_messages CASCADE;
-      DROP TABLE IF EXISTS uploaded_media CASCADE;
-      DROP TABLE IF EXISTS scheduled_messages CASCADE;
-      DROP TABLE IF EXISTS message_history CASCADE;
-      DROP TABLE IF EXISTS daily_statistics CASCADE;
-      DROP TABLE IF EXISTS api_settings CASCADE;
-    `
+    for (const table of tablesToDrop) {
+      await neonClient.query(`DROP TABLE IF EXISTS ${table} CASCADE`)
+      console.log(`[v0] Dropped table: ${table}`)
+    }
 
-    await neonPool.query(dropTablesSQL)
-    console.log("[v0] ✅ Existing tables dropped")
+    console.log("[v0] Creating tables in Neon...")
 
-    console.log("[v0] Creating tables in Neon with correct schema...")
-
-    const createTablesSQL = `
-      -- Create api_settings table (matches Supabase exactly)
+    await neonClient.query(`
       CREATE TABLE api_settings (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         phone_number_id TEXT,
@@ -59,9 +71,11 @@ export async function POST() {
         webhook_verify_token TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
+    console.log("[v0] ✅ Created table: api_settings")
 
-      -- Create daily_statistics table (matches Supabase exactly)
+    await neonClient.query(`
       CREATE TABLE daily_statistics (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         date DATE NOT NULL UNIQUE,
@@ -80,9 +94,11 @@ export async function POST() {
         scheduled_failed INTEGER DEFAULT 0,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
+    console.log("[v0] ✅ Created table: daily_statistics")
 
-      -- Create message_history table (matches Supabase exactly)
+    await neonClient.query(`
       CREATE TABLE message_history (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         to_number TEXT,
@@ -95,9 +111,11 @@ export async function POST() {
         message_id TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
+    console.log("[v0] ✅ Created table: message_history")
 
-      -- Create scheduled_messages table (matches Supabase exactly)
+    await neonClient.query(`
       CREATE TABLE scheduled_messages (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         template_name TEXT,
@@ -115,9 +133,11 @@ export async function POST() {
         processed_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
+    console.log("[v0] ✅ Created table: scheduled_messages")
 
-      -- Create uploaded_media table (matches Supabase exactly)
+    await neonClient.query(`
       CREATE TABLE uploaded_media (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         filename TEXT,
@@ -128,9 +148,11 @@ export async function POST() {
         preview_url TEXT,
         uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
+    console.log("[v0] ✅ Created table: uploaded_media")
 
-      -- Create webhook_messages table (matches Supabase exactly)
+    await neonClient.query(`
       CREATE TABLE webhook_messages (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         message_id TEXT,
@@ -146,23 +168,21 @@ export async function POST() {
         reply_sent_at TIMESTAMP WITH TIME ZONE,
         status TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+      )
+    `)
+    console.log("[v0] ✅ Created table: webhook_messages")
 
-      -- Create indexes
-      CREATE INDEX idx_message_history_to_number ON message_history(to_number);
-      CREATE INDEX idx_message_history_created_at ON message_history(created_at);
-      CREATE INDEX idx_daily_statistics_date ON daily_statistics(date);
-      CREATE INDEX idx_scheduled_messages_status ON scheduled_messages(status);
-      CREATE INDEX idx_scheduled_messages_time ON scheduled_messages(scheduled_time);
-      CREATE INDEX idx_webhook_messages_from ON webhook_messages(from_number);
-      CREATE INDEX idx_webhook_messages_timestamp ON webhook_messages(timestamp);
-      CREATE INDEX idx_webhook_messages_message_id ON webhook_messages(message_id);
-    `
+    console.log("[v0] Creating indexes...")
+    await neonClient.query(`CREATE INDEX idx_message_history_to_number ON message_history(to_number)`)
+    await neonClient.query(`CREATE INDEX idx_message_history_created_at ON message_history(created_at)`)
+    await neonClient.query(`CREATE INDEX idx_daily_statistics_date ON daily_statistics(date)`)
+    await neonClient.query(`CREATE INDEX idx_scheduled_messages_status ON scheduled_messages(status)`)
+    await neonClient.query(`CREATE INDEX idx_scheduled_messages_time ON scheduled_messages(scheduled_time)`)
+    await neonClient.query(`CREATE INDEX idx_webhook_messages_from ON webhook_messages(from_number)`)
+    await neonClient.query(`CREATE INDEX idx_webhook_messages_timestamp ON webhook_messages(timestamp)`)
+    await neonClient.query(`CREATE INDEX idx_webhook_messages_message_id ON webhook_messages(message_id)`)
+    console.log("[v0] ✅ Indexes created")
 
-    await neonPool.query(createTablesSQL)
-    console.log("[v0] ✅ Tables created successfully with correct schema")
-
-    // Step 2: Migrate data from Supabase to Neon
     const tables = [
       "api_settings",
       "daily_statistics",
@@ -174,50 +194,134 @@ export async function POST() {
 
     const migrationResults: Record<string, number> = {}
 
+    neonClient.release()
+    await neonPool.end()
+    console.log("[v0] Schema creation completed, released connection")
+
     for (const table of tables) {
       console.log(`[v0] Migrating ${table}...`)
 
-      // Fetch all data from Supabase
-      const { data, error } = await supabase.from(table).select("*")
+      // First, get the total count
+      const { count, error: countError } = await supabase.from(table).select("*", { count: "exact", head: true })
 
-      if (error) {
-        console.error(`[v0] Error fetching ${table}:`, error)
+      if (countError) {
+        console.error(`[v0] Error counting ${table}:`, countError)
         migrationResults[table] = 0
         continue
       }
 
-      if (!data || data.length === 0) {
+      const totalRows = count || 0
+      console.log(`[v0] Total rows in ${table}: ${totalRows}`)
+
+      if (totalRows === 0) {
         console.log(`[v0] No data in ${table}`)
         migrationResults[table] = 0
         continue
       }
 
-      // Insert data into Neon
-      let insertedCount = 0
-      for (const row of data) {
-        try {
-          const columns = Object.keys(row)
-          const values = columns.map((col) => row[col])
-          const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ")
+      // Fetch all data in pages of 1000 rows
+      const pageSize = 1000
+      let allData: any[] = []
 
-          const insertSQL = `
-            INSERT INTO ${table} (${columns.join(", ")})
-            VALUES (${placeholders})
-            ON CONFLICT DO NOTHING
-          `
+      for (let page = 0; page * pageSize < totalRows; page++) {
+        const { data, error } = await supabase
+          .from(table)
+          .select("*")
+          .range(page * pageSize, (page + 1) * pageSize - 1)
 
-          await neonPool.query(insertSQL, values)
-          insertedCount++
-        } catch (err) {
-          console.error(`[v0] Error inserting row in ${table}:`, err instanceof Error ? err.message : err)
+        if (error) {
+          console.error(`[v0] Error fetching page ${page} of ${table}:`, error)
+          continue
         }
+
+        if (data && data.length > 0) {
+          allData = allData.concat(data)
+          console.log(`[v0] Fetched page ${page + 1}: ${data.length} rows (total: ${allData.length}/${totalRows})`)
+        }
+      }
+
+      if (allData.length === 0) {
+        console.log(`[v0] No data fetched from ${table}`)
+        migrationResults[table] = 0
+        continue
+      }
+
+      console.log(`[v0] Fetched ${allData.length} total rows from ${table}, starting insert...`)
+
+      const tablePool = new Pool({ connectionString: neonConnectionString })
+      const tableClient = await tablePool.connect()
+      console.log(`[v0] Created fresh connection for ${table}`)
+
+      let insertedCount = 0
+      const batchSize = 100
+
+      try {
+        for (let i = 0; i < allData.length; i += batchSize) {
+          const batch = allData.slice(i, i + batchSize)
+
+          try {
+            if (batch.length > 0) {
+              const columns = Object.keys(batch[0])
+              const valueRows: string[] = []
+              const allValues: any[] = []
+              let paramIndex = 1
+
+              for (const row of batch) {
+                const rowPlaceholders = columns.map(() => `$${paramIndex++}`).join(", ")
+                valueRows.push(`(${rowPlaceholders})`)
+                columns.forEach((col) => allValues.push(row[col]))
+              }
+
+              const insertSQL = `
+                INSERT INTO ${table} (${columns.join(", ")})
+                VALUES ${valueRows.join(", ")}
+                ON CONFLICT DO NOTHING
+              `
+
+              await tableClient.query(insertSQL, allValues)
+              insertedCount += batch.length
+
+              if (insertedCount % 500 === 0 || insertedCount === allData.length) {
+                console.log(`[v0] Progress: ${insertedCount}/${allData.length} rows migrated to ${table}`)
+              }
+            }
+          } catch (err) {
+            console.error(`[v0] Error inserting batch in ${table}:`, err instanceof Error ? err.message : err)
+
+            // Try inserting rows one by one if batch fails
+            for (const row of batch) {
+              try {
+                const columns = Object.keys(row)
+                const values = columns.map((col) => row[col])
+                const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ")
+
+                const insertSQL = `
+                  INSERT INTO ${table} (${columns.join(", ")})
+                  VALUES (${placeholders})
+                  ON CONFLICT DO NOTHING
+                `
+
+                await tableClient.query(insertSQL, values)
+                insertedCount++
+              } catch (rowErr) {
+                console.error(
+                  `[v0] Error inserting row in ${table}:`,
+                  rowErr instanceof Error ? rowErr.message : rowErr,
+                )
+              }
+            }
+          }
+        }
+      } finally {
+        tableClient.release()
+        await tablePool.end()
+        console.log(`[v0] Released connection for ${table}`)
       }
 
       migrationResults[table] = insertedCount
       console.log(`[v0] ✅ Migrated ${insertedCount} rows from ${table}`)
     }
 
-    await neonPool.end()
     console.log("[v0] Migration completed successfully!")
 
     return NextResponse.json({
@@ -234,5 +338,7 @@ export async function POST() {
       },
       { status: 500 },
     )
+  } finally {
+    migrationInProgress = false
   }
 }

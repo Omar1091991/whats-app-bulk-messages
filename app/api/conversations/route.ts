@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { createClient } from "@/lib/neon/server"
 
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
 }
 
 export async function GET() {
-  const supabase = await createClient()
-  return await buildConversationsDynamically(supabase)
+  const neonClient = await createClient()
+  return await buildConversationsDynamically(neonClient)
 }
 
-async function buildConversationsDynamically(supabase: any) {
+async function buildConversationsDynamically(neonClient: any) {
   try {
     // Fetch incoming messages
-    const { data: incomingMessages, error: incomingError } = await supabase
-      .from("webhook_messages")
-      .select("*")
-      .order("timestamp", { ascending: false })
+    const { rows: incomingMessages, error: incomingError } = await neonClient.query(
+      "SELECT * FROM webhook_messages ORDER BY timestamp DESC",
+    )
 
     if (incomingError) {
       console.error("[v0] Error fetching incoming messages:", incomingError)
@@ -24,13 +23,12 @@ async function buildConversationsDynamically(supabase: any) {
     }
 
     // Fetch sent messages
-    const { data: sentMessages, error: sentError } = await supabase
-      .from("message_history")
-      .select("*")
-      .order("created_at", { ascending: false })
+    const { rows: sentMessages, error: sentError } = await neonClient.query(
+      "SELECT * FROM message_history ORDER BY created_at DESC",
+    )
 
     if (sentError) {
-      console.error("[v0] Error fetching sent messages:", sentError.message)
+      console.error("[v0] Error fetching sent messages:", sentError)
       return NextResponse.json({ error: "Failed to fetch messages" }, { status: 500 })
     }
 

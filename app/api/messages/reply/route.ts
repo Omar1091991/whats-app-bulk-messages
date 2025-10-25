@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { createClient } from "@/lib/neon/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
 
 function normalizePhoneNumber(phone: string): string {
@@ -15,9 +15,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    const supabase = await createClient()
+    const neonClient = await createClient()
 
-    const { data: settingsData, error: settingsError } = await supabase.from("api_settings").select("*").limit(1)
+    const { data: settingsData, error: settingsError } = await neonClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (settingsError || !settings) {
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const data = await response.json()
     const sentMessageId = data.messages?.[0]?.id
 
-    await supabase.from("message_history").insert({
+    await neonClient.from("message_history").insert({
       message_id: sentMessageId,
       to_number: toNumber,
       message_text: text,
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     })
 
     const normalizedPhone = normalizePhoneNumber(toNumber)
-    await supabase
+    await neonClient
       .from("webhook_messages")
       .update({
         replied: true,

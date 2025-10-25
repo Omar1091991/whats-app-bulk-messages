@@ -15,6 +15,7 @@ import {
   Video,
   ArrowRight,
   ArrowDown,
+  Download,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import useSWR from "swr"
@@ -210,16 +211,25 @@ export function WhatsAppInbox() {
   const formatTimestamp = (timestamp: number | string) => {
     const date = typeof timestamp === "number" ? new Date(timestamp * 1000) : new Date(timestamp)
     const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+    // Reset time to midnight for accurate day comparison
+    const dateAtMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const nowAtMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    const diffInMs = nowAtMidnight.getTime() - dateAtMidnight.getTime()
+    const days = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
 
     if (days === 0) {
+      // اليوم - عرض الوقت فقط
       return date.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })
     } else if (days === 1) {
+      // أمس
       return "أمس"
     } else if (days < 7) {
+      // خلال الأسبوع - عرض اسم اليوم
       return date.toLocaleDateString("ar-SA", { weekday: "long" })
     } else {
+      // أقدم من أسبوع - عرض التاريخ الكامل
       return date.toLocaleDateString("ar-SA", { day: "numeric", month: "numeric", year: "numeric" })
     }
   }
@@ -346,6 +356,38 @@ export function WhatsAppInbox() {
         const newSet = new Set(prev)
         newSet.delete(mediaId)
         return newSet
+      })
+    }
+  }
+
+  const exportConversation = async (format: "json" | "csv") => {
+    if (!selectedConversation) return
+
+    try {
+      const url = `/api/conversations/export?phone=${encodeURIComponent(selectedConversation.phone_number)}&format=${format}`
+      const response = await fetch(url)
+
+      if (!response.ok) throw new Error("فشل في تصدير المحادثة")
+
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = downloadUrl
+      a.download = `conversation-${selectedConversation.phone_number}.${format}`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      document.body.removeChild(a)
+
+      toast({
+        title: "تم التصدير بنجاح",
+        description: `تم تصدير المحادثة بصيغة ${format.toUpperCase()}`,
+      })
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "فشل في تصدير المحادثة",
+        variant: "destructive",
       })
     }
   }
@@ -536,9 +578,27 @@ export function WhatsAppInbox() {
               <Button variant="ghost" size="icon" className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10">
                 <Phone className="h-4 w-4 md:h-5 md:w-5" />
               </Button>
-              <Button variant="ghost" size="icon" className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10">
-                <MoreVertical className="h-4 w-4 md:h-5 md:w-5" />
-              </Button>
+              <div className="relative group">
+                <Button variant="ghost" size="icon" className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10">
+                  <MoreVertical className="h-4 w-4 md:h-5 md:w-5" />
+                </Button>
+                <div className="absolute left-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 min-w-[150px]">
+                  <button
+                    onClick={() => exportConversation("json")}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-white hover:bg-[#2a3942] text-sm"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>تصدير JSON</span>
+                  </button>
+                  <button
+                    onClick={() => exportConversation("csv")}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-white hover:bg-[#2a3942] text-sm"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>تصدير CSV</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { createClient } from "@/lib/neon/server"
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,8 +10,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Media ID is required" }, { status: 400 })
     }
 
-    const supabase = await createClient()
-    const { data: settings } = await supabase.from("api_settings").select("*").single()
+    const neonClient = await createClient()
+    const { data: settings } = await neonClient.from("api_settings").select("*").single()
 
     if (!settings?.access_token || !settings?.phone_number_id) {
       return NextResponse.json({ error: "WhatsApp not configured" }, { status: 500 })
