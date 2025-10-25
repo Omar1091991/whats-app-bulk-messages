@@ -1,0 +1,14 @@
+// WhatsApp Business API Configuration
+export const WHATSAPP_CONFIG = {
+  APP_ID: "1845524672893132",
+  PHONE_NUMBER_ID: "623846684149569",
+  BUSINESS_ACCOUNT_ID: "1096746608955840",
+  ACCESS_TOKEN:
+    "EAAaOfrKNUMwBPmuNhymuatuqSM0vCOTqKSH6ONP2QsI0AiKVg7j4SIE3ZBcL6XlrOVVNnemck8SU86HZANgVcPqbsC625CJy3sQtRaDP5AFexxz2CZAZA8Di5rTTODYh95XY0gPrXpMkP7ONheAqNcUDYWAbATfs8hvv3eABRDdQj3bVBaPb5ZB0pzzTQ0dOov18f1vpG50ZC2qpcFfKhMVQtlxLOsetoN5HlplJpU6hZCS8wZDZD",
+  API_VERSION: "v21.0",
+  BASE_URL: "https://graph.facebook.com",
+}
+
+export function getWhatsAppApiUrl(endpoint: string): string {
+  return `${WHATSAPP_CONFIG.BASE_URL}/${WHATSAPP_CONFIG.API_VERSION}/${endpoint}`
+}

@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/process-scheduled-messages",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/calculate-daily-stats",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}
