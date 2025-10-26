@@ -57,19 +57,9 @@ const MESSAGES_PER_PAGE = 10
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
-type FilterType = "all" | "unread" | "favorites"
+type FilterType = "all" | "unread" | "conversations"
 
 export function WhatsAppInbox() {
-  const { data: initialData, mutate: mutateConversations } = useSWR(`/api/conversations?limit=20&offset=0`, fetcher, {
-    refreshInterval: 3000,
-    onSuccess: (data) => {
-      if (offset === 0) {
-        setConversations(data.conversations || [])
-        setHasMore(data.hasMore || false)
-      }
-    },
-  })
-
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [replyText, setReplyText] = useState("")
   const [isSending, setIsSending] = useState(false)
@@ -92,6 +82,8 @@ export function WhatsAppInbox() {
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [offset, setOffset] = useState(0)
   const CONVERSATIONS_PER_PAGE = 20
+  const [totalConversations, setTotalConversations] = useState(0)
+  const [loadedConversations, setLoadedConversations] = useState(0)
 
   const searchRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -102,16 +94,25 @@ export function WhatsAppInbox() {
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [showChat, setShowChat] = useState(false)
 
-  const { data: messagesData, mutate: mutateMessages } = useSWR(
-    selectedConversation ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}` : null,
+  const { data: initialData, mutate: mutateConversations } = useSWR(
+    `/api/conversations?limit=${CONVERSATIONS_PER_PAGE}&offset=0&filter=${activeFilter}`,
     fetcher,
     {
-      refreshInterval: 2000,
-      revalidateOnFocus: true,
+      refreshInterval: 3000,
+      revalidateOnFocus: false,
+      onSuccess: (data) => {
+        if (offset === 0 && data.conversations) {
+          setConversations(data.conversations)
+          setHasMore(data.hasMore || false)
+          setTotalConversations(data.total || 0)
+          setLoadedConversations(data.conversations.length)
+          console.log("[v0] Initial load - conversations:", data.conversations.length, "of", data.total)
+        }
+      },
     },
   )
 
-  const conversationMessages: Message[] = messagesData?.messages || []
+  const conversationMessages: Message[] = initialData?.messages || []
 
   useEffect(() => {
     if (conversationMessages.length > 0 && isAtBottom) {
@@ -169,7 +170,7 @@ export function WhatsAppInbox() {
 
     setTimeout(() => scrollToBottom(), 100)
 
-    mutateMessages(
+    mutateConversations(
       async () => {
         try {
           const response = await fetch("/api/messages/reply", {
@@ -264,7 +265,7 @@ export function WhatsAppInbox() {
       if (activeFilter === "unread") {
         return conv.unread_count > 0
       }
-      if (activeFilter === "favorites") {
+      if (activeFilter === "conversations") {
         return conv.has_incoming_messages === true
       }
       return true
@@ -403,27 +404,57 @@ export function WhatsAppInbox() {
   }
 
   const loadMoreConversations = useCallback(async () => {
-    if (isLoadingMore || !hasMore) return
+    if (isLoadingMore || !hasMore) {
+      console.log("[v0] Skipping load more - isLoadingMore:", isLoadingMore, "hasMore:", hasMore)
+      return
+    }
 
     setIsLoadingMore(true)
+    const nextOffset = offset + CONVERSATIONS_PER_PAGE
+
+    console.log("[v0] Loading more conversations - current offset:", offset, "next offset:", nextOffset)
+
     try {
-      const nextOffset = offset + CONVERSATIONS_PER_PAGE
-      const response = await fetch(`/api/conversations?limit=${CONVERSATIONS_PER_PAGE}&offset=${nextOffset}`)
+      const response = await fetch(
+        `/api/conversations?limit=${CONVERSATIONS_PER_PAGE}&offset=${nextOffset}&filter=${activeFilter}`,
+      )
       const data = await response.json()
 
+      console.log("[v0] Loaded more conversations:", data.conversations?.length || 0, "hasMore:", data.hasMore)
+
       if (data.conversations && data.conversations.length > 0) {
-        setConversations((prev) => [...prev, ...data.conversations])
+        setConversations((prev) => {
+          // تجنب التكرار
+          const existingPhones = new Set(prev.map((c) => c.phone_number))
+          const newConversations = data.conversations.filter((c: Conversation) => !existingPhones.has(c.phone_number))
+          return [...prev, ...newConversations]
+        })
         setOffset(nextOffset)
         setHasMore(data.hasMore || false)
+        setLoadedConversations((prev) => prev + data.conversations.length)
       } else {
         setHasMore(false)
       }
     } catch (error) {
       console.error("[v0] Error loading more conversations:", error)
+      toast({
+        title: "خطأ",
+        description: "فشل في تحميل المزيد من المحادثات",
+        variant: "destructive",
+      })
     } finally {
       setIsLoadingMore(false)
     }
-  }, [offset, hasMore, isLoadingMore])
+  }, [offset, hasMore, isLoadingMore, activeFilter, toast])
+
+  useEffect(() => {
+    console.log("[v0] Filter changed to:", activeFilter, "- resetting conversations")
+    setOffset(0)
+    setConversations([])
+    setHasMore(true)
+    setLoadedConversations(0)
+    mutateConversations()
+  }, [activeFilter, mutateConversations])
 
   useEffect(() => {
     const conversationsList = conversationsListRef.current
@@ -433,13 +464,27 @@ export function WhatsAppInbox() {
       const { scrollTop, scrollHeight, clientHeight } = conversationsList
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
 
-      // عندما يصل المستخدم إلى 200px من الأسفل، قم بتحميل المزيد
-      if (distanceFromBottom < 200 && hasMore && !isLoadingMore) {
+      // تحميل المزيد عندما يكون المستخدم على بعد 100px من الأسفل
+      if (distanceFromBottom < 100 && hasMore && !isLoadingMore) {
+        console.log("[v0] Near bottom - triggering load more")
         loadMoreConversations()
       }
     }
 
     conversationsList.addEventListener("scroll", handleScroll)
+
+    // تحقق من الحاجة للتحميل عند التحميل الأولي
+    const checkInitialLoad = () => {
+      const { scrollHeight, clientHeight } = conversationsList
+      if (scrollHeight <= clientHeight && hasMore && !isLoadingMore) {
+        console.log("[v0] Content fits in viewport - loading more")
+        loadMoreConversations()
+      }
+    }
+
+    // تأخير بسيط للسماح بالتحميل الأولي
+    setTimeout(checkInitialLoad, 500)
+
     return () => conversationsList.removeEventListener("scroll", handleScroll)
   }, [hasMore, isLoadingMore, loadMoreConversations])
 
@@ -532,9 +577,9 @@ export function WhatsAppInbox() {
               غير مقروء
             </button>
             <button
-              onClick={() => setActiveFilter("favorites")}
+              onClick={() => setActiveFilter("conversations")}
               className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-all ${
-                activeFilter === "favorites"
+                activeFilter === "conversations"
                   ? "bg-[#00a884] text-white shadow-sm"
                   : "text-[#8696a0] hover:text-white hover:bg-[#2a3942]"
               }`}
@@ -549,11 +594,26 @@ export function WhatsAppInbox() {
             <div className="flex flex-col items-center justify-center p-8 text-[#667781]">
               <MessageSquare className="h-12 w-12 mb-4" />
               <p className="text-sm md:text-base">
-                {activeFilter === "unread" ? "لا توجد رسائل غير مقروءة" : "لا توجد محادثات"}
+                {activeFilter === "unread"
+                  ? "لا توجد رسائل غير مقروءة"
+                  : activeFilter === "conversations"
+                    ? "لا توجد محادثات واردة"
+                    : "لا توجد محادثات"}
               </p>
             </div>
           ) : (
             <div>
+              {totalConversations > 0 && (
+                <div className="px-3 py-2 text-center text-xs bg-[#202c33] text-[#8696a0] sticky top-0 z-10 border-b border-[#2a3942]">
+                  <div className="flex items-center justify-center gap-2">
+                    <span>
+                      تم تحميل {loadedConversations} من {totalConversations} محادثة
+                    </span>
+                    {hasMore && <span className="text-[#00a884]">• جاري التحميل التلقائي</span>}
+                  </div>
+                </div>
+              )}
+
               {displayedConversations.map((conversation) => (
                 <div
                   key={conversation.phone_number}
@@ -595,15 +655,19 @@ export function WhatsAppInbox() {
               ))}
 
               {isLoadingMore && (
-                <div className="flex items-center justify-center p-4">
-                  <Loader2 className="h-6 w-6 animate-spin text-[#00a884]" />
-                  <span className="text-[#667781] text-sm mr-2">جاري تحميل المزيد...</span>
+                <div className="flex items-center justify-center p-4 bg-[#111b21]">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-6 w-6 animate-spin text-[#00a884]" />
+                    <span className="text-[#667781] text-sm">جاري تحميل المزيد من المحادثات...</span>
+                  </div>
                 </div>
               )}
 
               {!hasMore && conversations.length > 0 && (
-                <div className="flex items-center justify-center p-4 text-[#667781] text-xs">
-                  تم تحميل جميع المحادثات
+                <div className="flex flex-col items-center justify-center p-6 text-[#667781] bg-[#111b21]">
+                  <CheckCheck className="h-8 w-8 mb-2 text-[#00a884]" />
+                  <p className="text-sm font-medium">تم تحميل جميع المحادثات</p>
+                  <p className="text-xs mt-1">({totalConversations} محادثة)</p>
                 </div>
               )}
             </div>
@@ -671,7 +735,7 @@ export function WhatsAppInbox() {
             className="flex-1 overflow-y-auto p-3 md:p-4 scroll-smooth relative"
             style={{ backgroundColor: "#0b141a" }}
           >
-            {!messagesData ? (
+            {!initialData ? (
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-8 w-8 animate-spin text-[#667781]" />
               </div>
