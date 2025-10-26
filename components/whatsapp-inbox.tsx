@@ -21,6 +21,7 @@ import {
   FileText,
   CheckSquare,
   Square,
+  X,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import useSWR from "swr"
@@ -102,6 +103,7 @@ export function WhatsAppInbox() {
 
   const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set())
   const [isExporting, setIsExporting] = useState(false)
+  const [isExportMode, setIsExportMode] = useState(false)
 
   const { data: conversationsData, mutate: mutateConversations } = useSWR(
     `/api/conversations?filter=${activeFilter}`,
@@ -421,6 +423,15 @@ export function WhatsAppInbox() {
     }
   }
 
+  const cancelExportMode = () => {
+    setIsExportMode(false)
+    setSelectedConversations(new Set())
+  }
+
+  const enterExportMode = () => {
+    setIsExportMode(true)
+  }
+
   const exportSelectedConversations = async (format: "excel" | "pdf") => {
     if (selectedConversations.size === 0) {
       toast({
@@ -458,7 +469,7 @@ export function WhatsAppInbox() {
         description: `تم تصدير ${selectedConversations.size} محادثة بصيغة ${format === "excel" ? "Excel" : "PDF"}`,
       })
 
-      setSelectedConversations(new Set())
+      cancelExportMode()
     } catch (error) {
       toast({
         title: "خطأ",
@@ -523,69 +534,6 @@ export function WhatsAppInbox() {
         <div className="bg-[#202c33] p-3 md:p-4 flex items-center justify-between flex-shrink-0">
           <h1 className="text-white text-lg md:text-xl font-semibold">المحادثات</h1>
           <div className="flex gap-2">
-            <div className="relative group">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10"
-                disabled={isExporting}
-              >
-                {isExporting ? (
-                  <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin" />
-                ) : (
-                  <FileDown className="h-4 w-4 md:h-5 md:w-5" />
-                )}
-              </Button>
-              <div className="absolute left-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 min-w-[200px]">
-                <div className="px-3 py-2 border-b border-[#2a3942]">
-                  <p className="text-xs text-[#8696a0] font-semibold">تصدير المحادثات</p>
-                </div>
-
-                {selectedConversations.size > 0 && (
-                  <>
-                    <div className="px-3 py-2 bg-[#1a2730] border-b border-[#2a3942]">
-                      <p className="text-[10px] text-[#00a884] font-medium">المحددة ({selectedConversations.size})</p>
-                    </div>
-                    <button
-                      onClick={() => exportSelectedConversations("excel")}
-                      disabled={isExporting}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
-                    >
-                      <FileSpreadsheet className="h-4 w-4 text-green-500" />
-                      <span>تصدير Excel</span>
-                    </button>
-                    <button
-                      onClick={() => exportSelectedConversations("pdf")}
-                      disabled={isExporting}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50 border-b border-[#2a3942]"
-                    >
-                      <FileText className="h-4 w-4 text-red-500" />
-                      <span>تصدير PDF</span>
-                    </button>
-                  </>
-                )}
-
-                <div className="px-3 py-2 bg-[#1a2730] border-b border-[#2a3942]">
-                  <p className="text-[10px] text-[#8696a0] font-medium">تصدير الكل ({totalConversations})</p>
-                </div>
-                <button
-                  onClick={() => exportAllConversationsNew("excel")}
-                  disabled={isExporting}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
-                >
-                  <FileSpreadsheet className="h-4 w-4 text-green-500" />
-                  <span>تصدير Excel</span>
-                </button>
-                <button
-                  onClick={() => exportAllConversationsNew("pdf")}
-                  disabled={isExporting}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
-                >
-                  <FileText className="h-4 w-4 text-red-500" />
-                  <span>تصدير PDF</span>
-                </button>
-              </div>
-            </div>
             <Button variant="ghost" size="icon" className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10">
               <MoreVertical className="h-4 w-4 md:h-5 md:w-5" />
             </Button>
@@ -637,28 +585,128 @@ export function WhatsAppInbox() {
           )}
         </div>
 
-        {displayedConversations.length > 0 && (
-          <div className="px-2 pt-2 bg-[#111b21] flex-shrink-0">
-            <div className="flex items-center justify-between bg-[#202c33] rounded-lg p-2">
-              <button
-                onClick={toggleSelectAll}
-                className="flex items-center gap-2 text-white hover:text-[#00a884] transition-colors"
-              >
-                {selectedConversations.size === displayedConversations.length ? (
-                  <CheckSquare className="h-5 w-5 text-[#00a884]" />
-                ) : (
-                  <Square className="h-5 w-5" />
-                )}
-                <span className="text-sm font-medium">
-                  {selectedConversations.size === displayedConversations.length ? "إلغاء التحديد" : "تحديد الكل"}
-                </span>
-              </button>
-              {selectedConversations.size > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[#8696a0]">محدد:</span>
-                  <span className="text-sm font-bold text-[#00a884]">{selectedConversations.size}</span>
-                </div>
+        <div className="px-2 pb-2 bg-[#111b21] flex-shrink-0">
+          <div className="relative group">
+            <button
+              className="w-full flex items-center justify-center gap-2 bg-[#202c33] hover:bg-[#2a3942] text-white rounded-lg py-2.5 px-3 transition-all text-sm font-medium"
+              disabled={isExporting}
+            >
+              {isExporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <FileDown className="h-4 w-4" />
+                  <span>تصدير المحادثات</span>
+                </>
               )}
+            </button>
+            <div className="absolute left-0 right-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <div className="px-3 py-2 border-b border-[#2a3942]">
+                <p className="text-xs text-[#8696a0] font-semibold">خيارات التصدير</p>
+              </div>
+
+              <button
+                onClick={enterExportMode}
+                disabled={isExporting}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50 border-b border-[#2a3942]"
+              >
+                <CheckSquare className="h-4 w-4 text-[#00a884]" />
+                <span>تحديد محادثات</span>
+              </button>
+
+              <div className="px-3 py-2 bg-[#1a2730] border-b border-[#2a3942]">
+                <p className="text-[10px] text-[#8696a0] font-medium">تصدير الكل ({totalConversations})</p>
+              </div>
+              <button
+                onClick={() => exportAllConversationsNew("excel")}
+                disabled={isExporting}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                <span>تصدير Excel</span>
+              </button>
+              <button
+                onClick={() => exportAllConversationsNew("pdf")}
+                disabled={isExporting}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+              >
+                <FileText className="h-4 w-4 text-red-500" />
+                <span>تصدير PDF</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {isExportMode && displayedConversations.length > 0 && (
+          <div className="px-2 pb-2 bg-[#111b21] flex-shrink-0">
+            <div className="flex items-center justify-between bg-[#00a884] rounded-lg p-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-2 text-white hover:text-[#111b21] transition-colors"
+                >
+                  {selectedConversations.size === displayedConversations.length ? (
+                    <CheckSquare className="h-5 w-5" />
+                  ) : (
+                    <Square className="h-5 w-5" />
+                  )}
+                  <span className="text-sm font-medium">
+                    {selectedConversations.size === displayedConversations.length ? "إلغاء الكل" : "تحديد الكل"}
+                  </span>
+                </button>
+                {selectedConversations.size > 0 && (
+                  <div className="flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full">
+                    <span className="text-xs font-medium">محدد:</span>
+                    <span className="text-sm font-bold">{selectedConversations.size}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedConversations.size > 0 && (
+                  <div className="relative group">
+                    <Button
+                      size="sm"
+                      className="bg-white text-[#00a884] hover:bg-white/90 h-8 px-3 text-xs font-medium"
+                      disabled={isExporting}
+                    >
+                      {isExporting ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <FileDown className="h-3 w-3 ml-1" />
+                          تصدير
+                        </>
+                      )}
+                    </Button>
+                    <div className="absolute left-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 min-w-[150px]">
+                      <button
+                        onClick={() => exportSelectedConversations("excel")}
+                        disabled={isExporting}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+                      >
+                        <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                        <span>Excel</span>
+                      </button>
+                      <button
+                        onClick={() => exportSelectedConversations("pdf")}
+                        disabled={isExporting}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+                      >
+                        <FileText className="h-4 w-4 text-red-500" />
+                        <span>PDF</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <Button
+                  onClick={cancelExportMode}
+                  size="sm"
+                  variant="ghost"
+                  className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -731,19 +779,21 @@ export function WhatsAppInbox() {
                     selectedConversation?.phone_number === conversation.phone_number ? "bg-[#2a3942]" : ""
                   }`}
                 >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggleSelectConversation(conversation.phone_number)
-                    }}
-                    className="flex-shrink-0 text-white hover:text-[#00a884] transition-colors"
-                  >
-                    {selectedConversations.has(conversation.phone_number) ? (
-                      <CheckSquare className="h-5 w-5 text-[#00a884]" />
-                    ) : (
-                      <Square className="h-5 w-5" />
-                    )}
-                  </button>
+                  {isExportMode && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleSelectConversation(conversation.phone_number)
+                      }}
+                      className="flex-shrink-0 text-white hover:text-[#00a884] transition-colors"
+                    >
+                      {selectedConversations.has(conversation.phone_number) ? (
+                        <CheckSquare className="h-5 w-5 text-[#00a884]" />
+                      ) : (
+                        <Square className="h-5 w-5" />
+                      )}
+                    </button>
+                  )}
 
                   <div
                     onClick={() => handleSelectConversation(conversation)}
