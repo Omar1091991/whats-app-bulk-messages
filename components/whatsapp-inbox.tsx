@@ -118,7 +118,17 @@ export function WhatsAppInbox() {
   const conversations = conversationsData?.conversations || []
   const totalConversations = conversationsData?.total || 0
 
-  const conversationMessages: Message[] = conversationsData?.messages || []
+  const { data: messagesData, mutate: mutateMessages } = useSWR(
+    selectedConversation ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}` : null,
+    fetcher,
+    {
+      refreshInterval: 5000,
+      dedupingInterval: 2000,
+      revalidateOnFocus: false,
+    },
+  )
+
+  const conversationMessages: Message[] = messagesData?.messages || []
 
   useEffect(() => {
     if (conversationMessages.length > 0 && isAtBottom) {
@@ -176,7 +186,7 @@ export function WhatsAppInbox() {
 
     setTimeout(() => scrollToBottom(), 100)
 
-    mutateConversations(
+    mutateMessages(
       async () => {
         try {
           const response = await fetch("/api/messages/reply", {
@@ -255,7 +265,7 @@ export function WhatsAppInbox() {
       .slice(0, 2)
   }
 
-  const filteredConversations = conversations
+  const filteredConversations = (conversations || [])
     .filter(
       (conv) =>
         conv.contact_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -282,6 +292,15 @@ export function WhatsAppInbox() {
     setSearchQuery("")
     setShowChat(true)
     setFailedImages(new Set())
+
+    if (conversation.unread_count > 0) {
+      fetch(`/api/conversations/${encodeURIComponent(conversation.phone_number)}`, {
+        method: "PATCH",
+      }).then(() => {
+        mutateConversations()
+      })
+    }
+
     if (typeof window !== "undefined") {
       const updatedViewedConversations = new Set(viewedConversations)
       updatedViewedConversations.add(conversation.phone_number)
@@ -830,7 +849,7 @@ export function WhatsAppInbox() {
         <div ref={conversationsListRef} className="flex-1 overflow-y-auto">
           {displayedConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-[#667781]">
-              <MessageSquare className="h-12 w-12 mb-4" />
+              <MessageSquare className="h-12 w-12 md:h-24 md:w-24 mx-auto mb-4 opacity-20" />
               <p className="text-sm md:text-base">
                 {activeFilter === "unread"
                   ? "لا توجد رسائل غير مقروءة"
@@ -978,7 +997,7 @@ export function WhatsAppInbox() {
             className="flex-1 overflow-y-auto p-3 md:p-4 scroll-smooth relative"
             style={{ backgroundColor: "#0b141a" }}
           >
-            {!conversationsData ? (
+            {!messagesData ? (
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-8 w-8 animate-spin text-[#667781]" />
               </div>
