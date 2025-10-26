@@ -8,7 +8,7 @@ let conversationsCache: {
   timestamp: number
 } | null = null
 
-const CACHE_DURATION = 120000 // 2 دقيقة
+const CACHE_DURATION = 60000 // 1 دقيقة
 
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
@@ -109,7 +109,6 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
 
         const conversationsMap = new Map<string, any>()
 
-        // معالجة الرسائل الواردة
         for (const msg of incomingMessages || []) {
           const normalizedPhone = normalizePhoneNumber(msg.from_number)
           const existing = conversationsMap.get(normalizedPhone)
@@ -118,10 +117,14 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
             const isRead = msg.status === "read"
             const hasReplied = msg.replied === true
 
+            const messageText = msg.message_text?.trim() || "رسالة واردة"
+
             conversationsMap.set(normalizedPhone, {
               phone_number: msg.from_number,
               contact_name: msg.from_name || msg.from_number,
-              last_message_text: msg.message_text,
+              last_message_text: messageText,
+              last_incoming_message_text: messageText, // حفظ آخر رسالة واردة
+              last_incoming_message_time: msg.timestamp, // حفظ وقت آخر رسالة واردة
               last_message_time: msg.timestamp,
               last_message_is_outgoing: false,
               unread_count: isRead ? 0 : 1,
@@ -130,19 +133,27 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
               updated_at: msg.timestamp,
               has_incoming_messages: true,
             })
+          } else if (existing && new Date(msg.timestamp) > new Date(existing.last_incoming_message_time || 0)) {
+            // تحديث آخر رسالة واردة فقط إذا كانت أحدث
+            const messageText = msg.message_text?.trim() || "رسالة واردة"
+            existing.last_incoming_message_text = messageText
+            existing.last_incoming_message_time = msg.timestamp
           }
         }
 
-        // معالجة الرسائل الصادرة
         for (const msg of outgoingMessages || []) {
           const normalizedPhone = normalizePhoneNumber(msg.to_number)
           const existing = conversationsMap.get(normalizedPhone)
+
+          const messageText = msg.message_text?.trim() || "رسالة صادرة"
 
           if (!existing) {
             conversationsMap.set(normalizedPhone, {
               phone_number: msg.to_number,
               contact_name: msg.to_number,
-              last_message_text: msg.message_text,
+              last_message_text: messageText,
+              last_incoming_message_text: null, // لا توجد رسالة واردة
+              last_incoming_message_time: null,
               last_message_time: msg.created_at,
               last_message_is_outgoing: true,
               unread_count: 0,
@@ -152,10 +163,12 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
               has_incoming_messages: false,
             })
           } else if (new Date(msg.created_at) > new Date(existing.last_message_time)) {
-            existing.last_message_text = msg.message_text
+            // تحديث آخر رسالة بشكل عام للترتيب، لكن الاحتفاظ بآخر رسالة واردة
+            existing.last_message_text = messageText
             existing.last_message_time = msg.created_at
             existing.last_message_is_outgoing = true
             existing.updated_at = msg.created_at
+            // لا نستبدل last_incoming_message_text هنا
           }
         }
 

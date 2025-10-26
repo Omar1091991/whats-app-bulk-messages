@@ -8,6 +8,8 @@ export async function GET(request: NextRequest) {
 
     const supabaseClient = await createClient()
 
+    console.log("[v0] Exporting incoming messages only from webhook_messages table")
+
     // جلب جميع الرسائل الواردة من webhook_messages فقط
     const { data: incomingMessages, error } = await supabaseClient
       .from("webhook_messages")
@@ -19,6 +21,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "فشل في جلب الرسائل الواردة" }, { status: 500 })
     }
 
+    console.log(`[v0] Fetched ${incomingMessages?.length || 0} incoming messages for export`)
+
     // تطبيق الفلتر على الرسائل الواردة
     let filteredMessages = incomingMessages || []
 
@@ -28,6 +32,8 @@ export async function GET(request: NextRequest) {
       // جميع الرسائل الواردة
       filteredMessages = filteredMessages
     }
+
+    console.log(`[v0] Exporting ${filteredMessages.length} incoming messages after filter: ${filter}`)
 
     // إنشاء محتوى Excel بصيغة CSV
     const headers = ["رقم الهاتف", "اسم جهة الاتصال", "نص الرسالة", "وقت الرسالة", "الحالة", "تم الرد"]
@@ -74,6 +80,8 @@ export async function POST(request: NextRequest) {
 
     const supabaseClient = await createClient()
 
+    console.log(`[v0] Exporting incoming messages only for ${phoneNumbers.length} selected phone numbers`)
+
     // جلب جميع الرسائل الواردة من الأرقام المحددة
     const { data: incomingMessages, error } = await supabaseClient
       .from("webhook_messages")
@@ -85,6 +93,8 @@ export async function POST(request: NextRequest) {
       console.error("[v0] Error fetching incoming messages:", error)
       return NextResponse.json({ error: "فشل في جلب الرسائل الواردة" }, { status: 500 })
     }
+
+    console.log(`[v0] Fetched ${incomingMessages?.length || 0} incoming messages for selected phone numbers`)
 
     // إنشاء محتوى Excel بصيغة CSV
     const headers = ["رقم الهاتف", "اسم جهة الاتصال", "نص الرسالة", "وقت الرسالة", "الحالة", "تم الرد"]

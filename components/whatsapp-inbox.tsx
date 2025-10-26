@@ -31,6 +31,7 @@ interface Conversation {
   contact_name: string
   unread_count: number
   last_message_text: string
+  last_incoming_message_text?: string | null // إضافة حقل آخر رسالة واردة
   last_message_time: string
   last_activity: string
   last_message_is_outgoing?: boolean
@@ -105,8 +106,8 @@ export function WhatsAppInbox() {
   const [isExportMode, setIsExportMode] = useState(false)
 
   const { data: conversationsData, mutate: mutateConversations } = useSWR(`/api/conversations`, fetcher, {
-    refreshInterval: 30000, // 30 ثانية
-    dedupingInterval: 15000, // 15 ثانية
+    refreshInterval: 15000, // 15 ثانية
+    dedupingInterval: 7500, // 7.5 ثانية
     revalidateOnFocus: true,
     revalidateOnReconnect: true,
   })
@@ -153,7 +154,7 @@ export function WhatsAppInbox() {
     selectedConversation ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}` : null,
     fetcher,
     {
-      refreshInterval: 15000, // 15 ثانية
+      refreshInterval: 10000, // 10 ثوانٍ
       dedupingInterval: 5000, // 5 ثوانٍ
       revalidateOnFocus: true,
     },
@@ -1001,11 +1002,16 @@ export function WhatsAppInbox() {
                           className={`text-xs md:text-sm truncate flex-1 flex items-center gap-1 ${
                             conversation.unread_count > 0 ? "text-white font-medium" : "text-[#667781]"
                           }`}
+                          title={conversation.last_incoming_message_text || conversation.last_message_text || "رسالة"}
                         >
-                          {conversation.last_message_is_outgoing && (
+                          {!conversation.last_incoming_message_text && conversation.last_message_is_outgoing && (
                             <CheckCheck className="h-3 w-3 text-[#53bdeb] flex-shrink-0" />
                           )}
-                          <span className="truncate">{conversation.last_message_text || "رسالة"}</span>
+                          <span className="truncate">
+                            {conversation.last_incoming_message_text?.trim() ||
+                              conversation.last_message_text?.trim() ||
+                              "رسالة"}
+                          </span>
                         </p>
                         {conversation.unread_count > 0 && (
                           <div className="bg-[#25d366] text-white h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold ml-2 flex-shrink-0 shadow-md">
