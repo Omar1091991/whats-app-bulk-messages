@@ -12,23 +12,16 @@ export async function GET(request: NextRequest) {
 
     const supabaseClient = await createClient()
 
-    // جلب جميع الرسائل الواردة
+    console.log("[v0] Exporting incoming messages only to PDF")
     const { data: incomingMessages, error: incomingError } = await supabaseClient
       .from("webhook_messages")
-      .select("from_number, from_name, message_text, timestamp, replied")
+      .select("from_number, from_name, message_text, timestamp, replied, status")
       .order("timestamp", { ascending: false })
 
     if (incomingError) throw incomingError
 
-    // جلب جميع الرسائل الصادرة
-    const { data: outgoingMessages, error: outgoingError } = await supabaseClient
-      .from("message_history")
-      .select("to_number, message_text, created_at, status")
-      .order("created_at", { ascending: false })
+    console.log(`[v0] Fetched ${incomingMessages?.length || 0} incoming messages for PDF export`)
 
-    if (outgoingError) throw outgoingError
-
-    // بناء المحادثات
     const conversationsMap = new Map<string, any>()
 
     for (const msg of incomingMessages || []) {
@@ -39,26 +32,10 @@ export async function GET(request: NextRequest) {
         conversationsMap.set(normalizedPhone, {
           phone_number: msg.from_number,
           contact_name: msg.from_name || msg.from_number,
-          last_message_text: msg.message_text,
+          last_message_text: msg.message_text || "رسالة",
           last_message_time: msg.timestamp,
-          unread_count: msg.replied ? 0 : 1,
+          unread_count: msg.status === "unread" ? 1 : 0,
           has_incoming_messages: true,
-        })
-      }
-    }
-
-    for (const msg of outgoingMessages || []) {
-      const normalizedPhone = normalizePhoneNumber(msg.to_number)
-      const existing = conversationsMap.get(normalizedPhone)
-
-      if (!existing || new Date(msg.created_at) > new Date(existing.last_message_time)) {
-        conversationsMap.set(normalizedPhone, {
-          phone_number: msg.to_number,
-          contact_name: existing?.contact_name || msg.to_number,
-          last_message_text: msg.message_text,
-          last_message_time: msg.created_at,
-          unread_count: existing?.unread_count || 0,
-          has_incoming_messages: existing?.has_incoming_messages || false,
         })
       }
     }
@@ -74,13 +51,14 @@ export async function GET(request: NextRequest) {
       conversations = conversations.filter((conv) => conv.has_incoming_messages)
     }
 
-    // إنشاء محتوى HTML بسيط يمكن طباعته كـ PDF
+    console.log(`[v0] Exporting ${conversations.length} conversations to PDF`)
+
     const htmlContent = `
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
   <meta charset="UTF-8">
-  <title>تقرير المحادثات</title>
+  <title>تقرير الرسائل الواردة</title>
   <style>
     body {
       font-family: 'Arial', sans-serif;
@@ -156,40 +134,43 @@ export async function GET(request: NextRequest) {
 </head>
 <body>
   <div class="header">
-    <h1>تقرير المحادثات</h1>
+    <h1>تقرير الرسائل الواردة من العملاء</h1>
     <p>تاريخ التصدير: ${new Date().toLocaleDateString("ar-SA")} - ${new Date().toLocaleTimeString("ar-SA")}</p>
-    <p>عدد المحادثات: ${conversations.length}</p>
+    <p>عدد الرسائل: ${conversations.length}</p>
   </div>
   
   <table>
     <thead>
       <tr>
-        <th>رقم الهاتف</th>
-        <th>اسم جهة الاتصال</th>
-        <th>آخر رسالة</th>
-        <th>وقت آخر رسالة</th>
-        <th>غير مقروء</th>
+        <th>الاسم</th>
+        <th>رقم الجوال</th>
+        <th>نص الرسالة الواردة</th>
+        <th>التاريخ</th>
+        <th>التوقيت</th>
+        <th>الحالة</th>
       </tr>
     </thead>
     <tbody>
       ${conversations
-        .map(
-          (conv: any) => `
+        .map((conv: any) => {
+          const messageDate = new Date(conv.last_message_time)
+          return `
         <tr>
-          <td>${conv.phone_number}</td>
           <td>${conv.contact_name}</td>
-          <td>${conv.last_message_text || "-"}</td>
-          <td>${new Date(conv.last_message_time).toLocaleString("ar-SA")}</td>
-          <td>${conv.unread_count > 0 ? `<span class="unread-badge">${conv.unread_count}</span>` : "-"}</td>
+          <td>${conv.phone_number}</td>
+          <td>${conv.last_message_text}</td>
+          <td>${messageDate.toLocaleDateString("ar-SA")}</td>
+          <td>${messageDate.toLocaleTimeString("ar-SA")}</td>
+          <td>${conv.unread_count > 0 ? `<span class="unread-badge">غير مقروء</span>` : "مقروء"}</td>
         </tr>
-      `,
-        )
+      `
+        })
         .join("")}
     </tbody>
   </table>
   
   <div class="footer">
-    <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب</p>
+    <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء فقط</p>
   </div>
 </body>
 </html>
@@ -198,7 +179,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse(htmlContent, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `attachment; filename="conversations-${new Date().toISOString().split("T")[0]}.html"`,
+        "Content-Disposition": `attachment; filename="incoming-messages-${new Date().toISOString().split("T")[0]}.html"`,
       },
     })
   } catch (error) {
@@ -218,31 +199,21 @@ export async function POST(request: NextRequest) {
     const supabaseClient = await createClient()
     const normalizedPhones = phoneNumbers.map((phone: string) => normalizePhoneNumber(phone))
 
-    // جلب الرسائل الواردة للأرقام المحددة
+    console.log("[v0] Exporting selected incoming messages only to PDF")
     const { data: incomingMessages, error: incomingError } = await supabaseClient
       .from("webhook_messages")
-      .select("from_number, from_name, message_text, timestamp, replied")
+      .select("from_number, from_name, message_text, timestamp, replied, status")
       .order("timestamp", { ascending: false })
 
     if (incomingError) throw incomingError
-
-    // جلب الرسائل الصادرة للأرقام المحددة
-    const { data: outgoingMessages, error: outgoingError } = await supabaseClient
-      .from("message_history")
-      .select("to_number, message_text, created_at, status")
-      .order("created_at", { ascending: false })
-
-    if (outgoingError) throw outgoingError
 
     // تصفية الرسائل للأرقام المحددة فقط
     const filteredIncoming = (incomingMessages || []).filter((msg) =>
       normalizedPhones.includes(normalizePhoneNumber(msg.from_number)),
     )
-    const filteredOutgoing = (outgoingMessages || []).filter((msg) =>
-      normalizedPhones.includes(normalizePhoneNumber(msg.to_number)),
-    )
 
-    // بناء المحادثات
+    console.log(`[v0] Fetched ${filteredIncoming.length} incoming messages for selected phones`)
+
     const conversationsMap = new Map<string, any>()
 
     for (const msg of filteredIncoming) {
@@ -253,24 +224,9 @@ export async function POST(request: NextRequest) {
         conversationsMap.set(normalizedPhone, {
           phone_number: msg.from_number,
           contact_name: msg.from_name || msg.from_number,
-          last_message_text: msg.message_text,
+          last_message_text: msg.message_text || "رسالة",
           last_message_time: msg.timestamp,
-          unread_count: msg.replied ? 0 : 1,
-        })
-      }
-    }
-
-    for (const msg of filteredOutgoing) {
-      const normalizedPhone = normalizePhoneNumber(msg.to_number)
-      const existing = conversationsMap.get(normalizedPhone)
-
-      if (!existing || new Date(msg.created_at) > new Date(existing.last_message_time)) {
-        conversationsMap.set(normalizedPhone, {
-          phone_number: msg.to_number,
-          contact_name: existing?.contact_name || msg.to_number,
-          last_message_text: msg.message_text,
-          last_message_time: msg.created_at,
-          unread_count: existing?.unread_count || 0,
+          unread_count: msg.status === "unread" ? 1 : 0,
         })
       }
     }
@@ -279,13 +235,14 @@ export async function POST(request: NextRequest) {
       (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
     )
 
-    // إنشاء محتوى HTML
+    console.log(`[v0] Exporting ${conversations.length} selected conversations to PDF`)
+
     const htmlContent = `
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
   <meta charset="UTF-8">
-  <title>تقرير المحادثات المحددة</title>
+  <title>تقرير الرسائل الواردة المحددة</title>
   <style>
     body {
       font-family: 'Arial', sans-serif;
@@ -361,40 +318,43 @@ export async function POST(request: NextRequest) {
 </head>
 <body>
   <div class="header">
-    <h1>تقرير المحادثات المحددة</h1>
+    <h1>تقرير الرسائل الواردة المحددة من العملاء</h1>
     <p>تاريخ التصدير: ${new Date().toLocaleDateString("ar-SA")} - ${new Date().toLocaleTimeString("ar-SA")}</p>
-    <p>عدد المحادثات: ${conversations.length}</p>
+    <p>عدد الرسائل: ${conversations.length}</p>
   </div>
   
   <table>
     <thead>
       <tr>
-        <th>رقم الهاتف</th>
-        <th>اسم جهة الاتصال</th>
-        <th>آخر رسالة</th>
-        <th>وقت آخر رسالة</th>
-        <th>غير مقروء</th>
+        <th>الاسم</th>
+        <th>رقم الجوال</th>
+        <th>نص الرسالة الواردة</th>
+        <th>التاريخ</th>
+        <th>التوقيت</th>
+        <th>الحالة</th>
       </tr>
     </thead>
     <tbody>
       ${conversations
-        .map(
-          (conv: any) => `
+        .map((conv: any) => {
+          const messageDate = new Date(conv.last_message_time)
+          return `
         <tr>
-          <td>${conv.phone_number}</td>
           <td>${conv.contact_name}</td>
-          <td>${conv.last_message_text || "-"}</td>
-          <td>${new Date(conv.last_message_time).toLocaleString("ar-SA")}</td>
-          <td>${conv.unread_count > 0 ? `<span class="unread-badge">${conv.unread_count}</span>` : "-"}</td>
+          <td>${conv.phone_number}</td>
+          <td>${conv.last_message_text}</td>
+          <td>${messageDate.toLocaleDateString("ar-SA")}</td>
+          <td>${messageDate.toLocaleTimeString("ar-SA")}</td>
+          <td>${conv.unread_count > 0 ? `<span class="unread-badge">غير مقروء</span>` : "مقروء"}</td>
         </tr>
-      `,
-        )
+      `
+        })
         .join("")}
     </tbody>
   </table>
   
   <div class="footer">
-    <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب</p>
+    <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء فقط</p>
   </div>
 </body>
 </html>
@@ -403,7 +363,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse(htmlContent, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `attachment; filename="selected-conversations-${new Date().toISOString().split("T")[0]}.html"`,
+        "Content-Disposition": `attachment; filename="selected-incoming-messages-${new Date().toISOString().split("T")[0]}.html"`,
       },
     })
   } catch (error) {
