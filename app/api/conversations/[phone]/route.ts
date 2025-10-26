@@ -2,8 +2,23 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
 function normalizePhoneNumber(phone: string): string {
-  // إزالة جميع الأحرف غير الرقمية (المسافات، الشرطات، الأقواس، +)
   const cleaned = phone.replace(/\D/g, "")
+
+  // إذا كان الرقم يبدأ بـ 966، نحتفظ به كما هو
+  if (cleaned.startsWith("966")) {
+    return cleaned
+  }
+
+  // إذا كان الرقم يبدأ بـ 0، نستبدله بـ 966
+  if (cleaned.startsWith("0")) {
+    return "966" + cleaned.substring(1)
+  }
+
+  // إذا كان الرقم لا يبدأ بـ 966 أو 0، نضيف 966
+  if (!cleaned.startsWith("966")) {
+    return "966" + cleaned
+  }
+
   return cleaned
 }
 
@@ -14,12 +29,16 @@ export async function GET(request: Request, { params }: { params: { phone: strin
 
     const normalizedPhone = normalizePhoneNumber(phone)
 
-    console.log("[v0] Fetching messages for phone:", normalizedPhone)
+    console.log("[v0] Fetching messages for phone:", phone, "normalized:", normalizedPhone)
+
+    const phoneVariants = [normalizedPhone, phone, phone.replace(/\D/g, "")]
+
+    console.log("[v0] Phone variants:", phoneVariants)
 
     const { data: incomingMessages, error: incomingError } = await supabaseClient
       .from("webhook_messages")
       .select("*")
-      .eq("from_number", normalizedPhone)
+      .or(phoneVariants.map((p) => `from_number.eq.${p}`).join(","))
       .order("created_at", { ascending: true })
 
     if (incomingError) {
@@ -32,7 +51,7 @@ export async function GET(request: Request, { params }: { params: { phone: strin
     const { data: sentReplies, error: sentError } = await supabaseClient
       .from("message_history")
       .select("*")
-      .eq("to_number", normalizedPhone)
+      .or(phoneVariants.map((p) => `to_number.eq.${p}`).join(","))
       .order("created_at", { ascending: true })
 
     if (sentError) {

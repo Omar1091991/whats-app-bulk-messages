@@ -21,6 +21,7 @@ import {
   CheckSquare,
   Square,
   X,
+  Bell,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import useSWR from "swr"
@@ -82,14 +83,6 @@ export function WhatsAppInbox() {
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
   const [loadingMediaIds, setLoadingMediaIds] = useState<Set<string>>(new Set())
   const [mediaCache, setMediaCache] = useState<Map<string, string>>(new Map())
-  // Removed: const [conversations, setConversations] = useState<Conversation[]>([])
-  // Removed: const [hasMore, setHasMore] = useState(true)
-  // Removed: const [isLoadingMore, setIsLoadingMore] = useState(false)
-  // Removed: const [offset, setOffset] = useState(0)
-  // Removed: const CONVERSATIONS_PER_PAGE = 100
-  // Removed: const [totalConversations, setTotalConversations] = useState(0)
-  // Removed: const [loadedConversations, setLoadedConversations] = useState(0)
-  // Removed: const isInitialLoadingRef = useRef(false)
 
   const searchRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -108,10 +101,10 @@ export function WhatsAppInbox() {
     `/api/conversations?filter=${activeFilter}`,
     fetcher,
     {
-      refreshInterval: 10000,
-      dedupingInterval: 5000,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
+      refreshInterval: 5000, // تحديث كل 5 ثوانٍ
+      dedupingInterval: 2000,
+      revalidateOnFocus: true, // تحديث عند العودة للتطبيق
+      revalidateOnReconnect: true, // تحديث عند إعادة الاتصال
     },
   )
 
@@ -122,9 +115,9 @@ export function WhatsAppInbox() {
     selectedConversation ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}` : null,
     fetcher,
     {
-      refreshInterval: 5000,
-      dedupingInterval: 2000,
-      revalidateOnFocus: false,
+      refreshInterval: 3000, // تحديث كل 3 ثوانٍ
+      dedupingInterval: 1000,
+      revalidateOnFocus: true,
     },
   )
 
@@ -614,8 +607,6 @@ export function WhatsAppInbox() {
     }
   }
 
-  // Removed: loadMoreConversations, and related effects and states
-
   if (!conversationsData) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -897,30 +888,56 @@ export function WhatsAppInbox() {
                     onClick={() => handleSelectConversation(conversation)}
                     className="flex items-center gap-2 md:gap-3 flex-1 min-w-0"
                   >
-                    <Avatar className="h-10 w-10 md:h-12 md:w-12 flex-shrink-0">
-                      <AvatarFallback className="bg-[#00a884] text-white text-xs md:text-sm">
-                        {getInitials(conversation.contact_name)}
-                      </AvatarFallback>
-                    </Avatar>
+                    <div className="relative flex-shrink-0">
+                      <Avatar className="h-10 w-10 md:h-12 md:w-12">
+                        <AvatarFallback className="bg-[#00a884] text-white text-xs md:text-sm">
+                          {getInitials(conversation.contact_name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
+                        <div className="absolute -top-1 -right-1 bg-[#25d366] text-white h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold border-2 border-[#111b21] shadow-lg animate-pulse">
+                          <Bell className="h-3 w-3" />
+                        </div>
+                      )}
+                    </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <h3 className="text-white font-medium text-sm md:text-base truncate">
-                          {conversation.contact_name}
-                        </h3>
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <h3
+                            className={`font-medium text-sm md:text-base truncate ${
+                              conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number)
+                                ? "text-white font-bold"
+                                : "text-white"
+                            }`}
+                          >
+                            {conversation.contact_name}
+                          </h3>
+                          {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
+                            <span className="bg-[#25d366] text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">
+                              جديد
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] md:text-xs text-[#667781] ml-2 flex-shrink-0">
                           {formatTimestamp(conversation.last_message_time)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <p className="text-xs md:text-sm text-[#667781] truncate flex-1 flex items-center gap-1">
+                        <p
+                          className={`text-xs md:text-sm truncate flex-1 flex items-center gap-1 ${
+                            conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number)
+                              ? "text-white font-medium"
+                              : "text-[#667781]"
+                          }`}
+                        >
                           {conversation.last_message_is_outgoing && (
                             <CheckCheck className="h-3 w-3 text-[#53bdeb] flex-shrink-0" />
                           )}
                           <span className="truncate">{conversation.last_message_text || "رسالة"}</span>
                         </p>
                         {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
-                          <div className="bg-[#25d366] text-white h-5 w-5 rounded-full flex items-center justify-center text-[10px] md:text-[11px] font-bold ml-2 flex-shrink-0">
+                          <div className="bg-[#25d366] text-white h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold ml-2 flex-shrink-0 shadow-md">
                             {conversation.unread_count}
                           </div>
                         )}

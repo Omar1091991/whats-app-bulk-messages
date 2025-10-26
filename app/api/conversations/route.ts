@@ -8,7 +8,7 @@ let conversationsCache: {
   timestamp: number
 } | null = null
 
-const CACHE_DURATION = 30000 // 30 ثانية
+const CACHE_DURATION = 5000 // 5 ثوانٍ
 
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
@@ -70,7 +70,7 @@ async function buildConversationsDynamically(
     let allConversations: any[]
 
     if (conversationsCache && now - conversationsCache.timestamp < CACHE_DURATION) {
-      console.log("[v0] Cached conversations:", conversationsCache.data.length)
+      console.log("[v0] Using cached conversations:", conversationsCache.data.length)
       allConversations = conversationsCache.data
     } else {
       console.log("[v0] Fetching fresh conversations data...")
@@ -87,6 +87,10 @@ async function buildConversationsDynamically(
         "message_history",
         "to_number, message_text, created_at, status",
         "created_at",
+      )
+
+      console.log(
+        `[v0] Fetched ${incomingMessages.length} incoming messages, ${outgoingMessages.length} outgoing messages`,
       )
 
       const conversationsMap = new Map<string, any>()
@@ -114,24 +118,30 @@ async function buildConversationsDynamically(
         }
       }
 
-      // معالجة الرسائل الصادرة
       for (const msg of outgoingMessages || []) {
         const normalizedPhone = normalizePhoneNumber(msg.to_number)
         const existing = conversationsMap.get(normalizedPhone)
 
-        if (!existing || new Date(msg.created_at) > new Date(existing.last_message_time)) {
+        // فقط تحديث إذا لم يكن هناك محادثة موجودة أو إذا كانت الرسالة الصادرة أحدث
+        if (!existing) {
           conversationsMap.set(normalizedPhone, {
             phone_number: msg.to_number,
-            contact_name: existing?.contact_name || msg.to_number,
+            contact_name: msg.to_number,
             last_message_text: msg.message_text,
             last_message_time: msg.created_at,
             last_message_is_outgoing: true,
-            unread_count: existing?.unread_count || 0,
+            unread_count: 0,
             is_read: true,
-            has_replied: existing?.has_replied || false,
+            has_replied: false,
             updated_at: msg.created_at,
-            has_incoming_messages: existing?.has_incoming_messages || false,
+            has_incoming_messages: false,
           })
+        } else if (new Date(msg.created_at) > new Date(existing.last_message_time)) {
+          // تحديث فقط إذا كانت الرسالة الصادرة أحدث
+          existing.last_message_text = msg.message_text
+          existing.last_message_time = msg.created_at
+          existing.last_message_is_outgoing = true
+          existing.updated_at = msg.created_at
         }
       }
 
@@ -150,11 +160,17 @@ async function buildConversationsDynamically(
     let filteredConversations = allConversations
 
     if (filter === "unread") {
-      // فلتر "الغير مقروء": الرسائل الواردة التي لم يتم قراءتها
-      filteredConversations = allConversations.filter((conv) => !conv.is_read && conv.unread_count > 0)
+      // فلتر "الغير مقروء": الرسائل الواردة التي status="unread"
+      filteredConversations = allConversations.filter(
+        (conv) => conv.status === "unread" || (!conv.is_read && conv.unread_count > 0),
+      )
+      console.log(`[v0] Filter 'unread': ${filteredConversations.length} conversations`)
     } else if (filter === "conversations") {
-      // فلتر "المحادثات": الرسائل الواردة التي تم الرد عليها
-      filteredConversations = allConversations.filter((conv) => conv.has_incoming_messages && conv.has_replied)
+      // فلتر "المحادثات": جميع الرسائل الواردة (سواء تم الرد عليها أم لا)
+      filteredConversations = allConversations.filter((conv) => conv.has_incoming_messages === true)
+      console.log(`[v0] Filter 'conversations': ${filteredConversations.length} conversations`)
+    } else {
+      console.log(`[v0] Filter 'all': ${filteredConversations.length} conversations`)
     }
 
     const totalConversations = filteredConversations.length

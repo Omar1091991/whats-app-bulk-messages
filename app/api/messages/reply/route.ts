@@ -59,16 +59,28 @@ export async function POST(request: Request) {
     })
 
     const normalizedPhone = normalizePhoneNumber(toNumber)
-    await supabaseClient
-      .from("webhook_messages")
-      .update({
-        replied: true,
-        reply_text: text,
-        reply_sent_at: new Date().toISOString(),
-        status: "read",
-      })
-      .eq("from_number", toNumber)
-      .eq("replied", false)
+
+    // البحث عن جميع صيغ الرقم الممكنة
+    const phoneVariants = [
+      toNumber,
+      normalizedPhone,
+      normalizedPhone.startsWith("966") ? normalizedPhone : "966" + normalizedPhone,
+      normalizedPhone.startsWith("0") ? "966" + normalizedPhone.substring(1) : normalizedPhone,
+    ]
+
+    // تحديث جميع الرسائل غير المقروءة من هذا الرقم
+    for (const phoneVariant of phoneVariants) {
+      await supabaseClient
+        .from("webhook_messages")
+        .update({
+          replied: true,
+          reply_text: text,
+          reply_sent_at: new Date().toISOString(),
+          status: "read",
+        })
+        .eq("from_number", phoneVariant)
+        .eq("replied", false)
+    }
 
     return NextResponse.json({ success: true, messageId: sentMessageId })
   } catch (error) {
