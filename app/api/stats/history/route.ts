@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -8,9 +8,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const limit = Number.parseInt(searchParams.get("limit") || "30")
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { data: history, error } = await neonClient
+    const { data: history, error } = await supabaseClient
       .from("daily_statistics")
       .select("*")
       .order("date", { ascending: false })

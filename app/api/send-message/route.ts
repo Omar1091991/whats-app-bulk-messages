@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 interface TemplateParameters {
   mediaType?: "IMAGE" | "VIDEO" | "DOCUMENT"
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "رقم الهاتف غير صحيح", success: false }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     console.log("[v0] جاري فحص حدود الإرسال من Meta...")
     const rateLimitsResponse = await fetch(`${request.url.split("/api/")[0]}/api/meta-rate-limits`)
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
 
     const shouldWarn = rateLimitsData.remaining <= 100
 
-    const { data: settingsData, error: settingsError } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data: settingsData, error: settingsError } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (settingsError || !settings) {
@@ -251,7 +251,7 @@ export async function POST(request: Request) {
     console.log("[v0] Message status:", data.messages?.[0]?.message_status)
 
     console.log("[v0] جاري حفظ الرسالة في قاعدة البيانات...")
-    await neonClient.from("message_history").insert({
+    await supabaseClient.from("message_history").insert({
       message_id: data.messages?.[0]?.id,
       to_number: phoneNumber,
       template_name: template.name,

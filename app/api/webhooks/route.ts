@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
@@ -74,8 +74,8 @@ export async function GET(request: Request) {
     )
   }
 
-  const neonClient = await createClient()
-  const { data: settingsData, error: dbError } = await neonClient
+  const supabaseClient = await createClient()
+  const { data: settingsData, error: dbError } = await supabaseClient
     .from("api_settings")
     .select("webhook_verify_token")
     .limit(1)
@@ -119,9 +119,9 @@ export async function POST(request: Request) {
     const body = await request.json()
     console.log("[v0] Webhook received:", JSON.stringify(body, null, 2))
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { data: settingsData } = await neonClient.from("api_settings").select("access_token").limit(1)
+    const { data: settingsData } = await supabaseClient.from("api_settings").select("access_token").limit(1)
     const accessToken = settingsData?.[0]?.access_token
 
     if (body.object === "whatsapp_business_account") {
@@ -206,50 +206,13 @@ export async function POST(request: Request) {
                 replied: false,
               }
 
-              const { error } = await neonClient.from("webhook_messages").insert(messageData)
+              const { error } = await supabaseClient.from("webhook_messages").insert(messageData)
 
               if (error) {
                 console.error("[v0] ❌ Error inserting message:", error)
               } else {
                 console.log("[v0] ✅ Message stored successfully:", messageData.message_id)
                 console.log("[v0] Stored message data:", JSON.stringify(messageData, null, 2))
-
-                const normalizedPhone = normalizePhoneNumber(message.from)
-                const contactName = value.contacts?.[0]?.profile?.name || message.from
-
-                const lastMessageText =
-                  messageData.message_text || (mediaUrl ? "صورة" : messageType === "button_reply" ? "رد سريع" : "رسالة")
-
-                const { data: existingConv } = await neonClient
-                  .from("conversations")
-                  .select("*")
-                  .eq("phone_number", normalizedPhone)
-                  .single()
-
-                if (existingConv) {
-                  await neonClient
-                    .from("conversations")
-                    .update({
-                      contact_name: contactName,
-                      last_message_text: lastMessageText,
-                      last_message_time: new Date(Number.parseInt(message.timestamp) * 1000).toISOString(),
-                      last_message_is_outgoing: false,
-                      unread_count: (existingConv.unread_count || 0) + 1,
-                      has_incoming_messages: true,
-                    })
-                    .eq("phone_number", normalizedPhone)
-                } else {
-                  await neonClient.from("conversations").insert({
-                    phone_number: normalizedPhone,
-                    contact_name: contactName,
-                    last_message_text: lastMessageText,
-                    last_message_time: new Date(Number.parseInt(message.timestamp) * 1000).toISOString(),
-                    last_message_is_outgoing: false,
-                    unread_count: 1,
-                    has_incoming_messages: true,
-                    has_replies: false,
-                  })
-                }
               }
             }
 
@@ -260,7 +223,7 @@ export async function POST(request: Request) {
                 timestamp: status.timestamp,
               })
 
-              await neonClient
+              await supabaseClient
                 .from("message_history")
                 .update({
                   status: status.status,

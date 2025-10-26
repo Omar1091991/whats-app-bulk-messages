@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -16,128 +16,154 @@ export async function GET(request: Request) {
 
   console.log("[v0] API - Fetching conversations with limit:", limit || "ALL", "offset:", offset, "filter:", filter)
 
-  const neonClient = await createClient()
-  return await buildConversationsDynamically(neonClient, limit, offset, filter)
+  const supabaseClient = await createClient()
+  return await buildConversationsDynamically(supabaseClient, limit, offset, filter)
 }
 
-async function buildConversationsDynamically(neonClient: any, limit: number | null, offset: number, filter: string) {
+async function fetchAllRecords(supabaseClient: any, tableName: string, selectFields: string, orderBy: string) {
+  const allRecords: any[] = []
+  let from = 0
+  const batchSize = 1000
+  let hasMore = true
+
+  console.log(`[v0] API - Starting to fetch all records from ${tableName}...`)
+
+  while (hasMore) {
+    const { data, error } = await supabaseClient
+      .from(tableName)
+      .select(selectFields)
+      .order(orderBy, { ascending: false })
+      .range(from, from + batchSize - 1)
+
+    if (error) {
+      console.error(`[v0] API - Error fetching from ${tableName}:`, error)
+      throw error
+    }
+
+    if (data && data.length > 0) {
+      allRecords.push(...data)
+      console.log(`[v0] API - Fetched ${data.length} records from ${tableName} (total so far: ${allRecords.length})`)
+
+      if (data.length < batchSize) {
+        hasMore = false
+      } else {
+        from += batchSize
+      }
+    } else {
+      hasMore = false
+    }
+  }
+
+  console.log(`[v0] API - Finished fetching ${allRecords.length} total records from ${tableName}`)
+  return allRecords
+}
+
+async function buildConversationsDynamically(
+  supabaseClient: any,
+  limit: number | null,
+  offset: number,
+  filter: string,
+) {
   try {
-    const { rows: countRows } = await neonClient.query(`
-      WITH all_phones AS (
-        SELECT DISTINCT REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone
-        FROM webhook_messages
-        UNION
-        SELECT DISTINCT REGEXP_REPLACE(to_number, '[^0-9]', '', 'g') as normalized_phone
-        FROM message_history
-      )
-      SELECT COUNT(*) as total FROM all_phones
-    `)
+    console.log("[v0] API - Starting to fetch messages from database...")
 
-    const totalConversations = Number.parseInt(countRows[0]?.total || "0")
-    console.log("[v0] API - Total conversations in database:", totalConversations)
-
-    const limitClause = limit !== null ? `LIMIT $1 OFFSET $2` : `OFFSET $1`
-    const queryParams = limit !== null ? [limit, offset] : [offset]
-
-    const { rows: conversations } = await neonClient.query(
-      `
-      WITH all_messages AS (
-        SELECT 
-          REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone,
-          from_number as phone_number,
-          COALESCE(from_name, from_number) as contact_name,
-          message_text,
-          to_timestamp(timestamp) as message_time,
-          false as is_outgoing,
-          NOT replied as is_unread,
-          'incoming' as source
-        FROM webhook_messages
-        
-        UNION ALL
-        
-        SELECT 
-          REGEXP_REPLACE(to_number, '[^0-9]', '', 'g') as normalized_phone,
-          to_number as phone_number,
-          to_number as contact_name,
-          message_text,
-          created_at as message_time,
-          true as is_outgoing,
-          false as is_unread,
-          'outgoing' as source
-        FROM message_history
-      ),
-      latest_per_phone AS (
-        SELECT DISTINCT ON (normalized_phone)
-          normalized_phone,
-          phone_number,
-          contact_name,
-          message_text,
-          message_time,
-          is_outgoing,
-          is_unread,
-          source
-        FROM all_messages
-        ORDER BY normalized_phone, message_time DESC
-      ),
-      unread_counts AS (
-        SELECT 
-          REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone,
-          COUNT(*) FILTER (WHERE NOT replied) as unread_count
-        FROM webhook_messages
-        GROUP BY REGEXP_REPLACE(from_number, '[^0-9]', '', 'g')
-      ),
-      has_incoming AS (
-        SELECT DISTINCT
-          REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone,
-          true as has_incoming_messages
-        FROM webhook_messages
-      )
-      SELECT 
-        l.phone_number,
-        l.contact_name,
-        COALESCE(l.message_text, '') as last_message_text,
-        l.message_time as last_message_time,
-        l.is_outgoing as last_message_is_outgoing,
-        COALESCE(u.unread_count, 0)::int as unread_count,
-        l.message_time as updated_at,
-        NOT l.is_unread as is_read,
-        COALESCE(h.has_incoming_messages, false) as has_incoming_messages
-      FROM latest_per_phone l
-      LEFT JOIN unread_counts u ON l.normalized_phone = u.normalized_phone
-      LEFT JOIN has_incoming h ON l.normalized_phone = h.normalized_phone
-      ${filter === "unread" ? "WHERE COALESCE(u.unread_count, 0) > 0" : ""}
-      ${filter === "conversations" ? "WHERE COALESCE(h.has_incoming_messages, false) = true" : ""}
-      ORDER BY l.message_time DESC
-      ${limitClause}
-    `,
-      queryParams,
+    const incomingMessages = await fetchAllRecords(
+      supabaseClient,
+      "webhook_messages",
+      "from_number, from_name, message_text, timestamp, replied",
+      "timestamp",
     )
 
-    console.log("[v0] API - Fetched", conversations?.length || 0, "conversations")
+    const outgoingMessages = await fetchAllRecords(
+      supabaseClient,
+      "message_history",
+      "to_number, message_text, created_at, status",
+      "created_at",
+    )
 
-    const formattedConversations = (conversations || []).map((conv: any) => ({
-      phone_number: conv.phone_number,
-      contact_name: conv.contact_name,
-      last_message_text: conv.last_message_text,
-      last_message_time: new Date(conv.last_message_time).toISOString(),
-      last_message_is_outgoing: conv.last_message_is_outgoing,
-      unread_count: conv.unread_count,
-      is_read: conv.is_read,
-      updated_at: new Date(conv.updated_at).toISOString(),
-      has_incoming_messages: conv.has_incoming_messages,
-    }))
+    const conversationsMap = new Map<string, any>()
 
-    const hasMore = limit !== null ? offset + conversations.length < totalConversations : false
+    // Process incoming messages
+    for (const msg of incomingMessages || []) {
+      const normalizedPhone = normalizePhoneNumber(msg.from_number)
+      const existing = conversationsMap.get(normalizedPhone)
 
-    console.log("[v0] API - Returning hasMore:", hasMore, "total loaded:", conversations.length)
+      if (!existing || new Date(msg.timestamp) > new Date(existing.last_message_time)) {
+        conversationsMap.set(normalizedPhone, {
+          phone_number: msg.from_number,
+          contact_name: msg.from_name || msg.from_number,
+          last_message_text: msg.message_text,
+          last_message_time: msg.timestamp,
+          last_message_is_outgoing: false,
+          unread_count: msg.replied ? 0 : 1,
+          is_read: msg.replied,
+          updated_at: msg.timestamp,
+          has_incoming_messages: true,
+        })
+      }
+    }
+
+    console.log("[v0] API - After processing incoming messages, conversationsMap size:", conversationsMap.size)
+
+    // Process outgoing messages
+    for (const msg of outgoingMessages || []) {
+      const normalizedPhone = normalizePhoneNumber(msg.to_number)
+      const existing = conversationsMap.get(normalizedPhone)
+
+      if (!existing || new Date(msg.created_at) > new Date(existing.last_message_time)) {
+        conversationsMap.set(normalizedPhone, {
+          phone_number: msg.to_number,
+          contact_name: existing?.contact_name || msg.to_number,
+          last_message_text: msg.message_text,
+          last_message_time: msg.created_at,
+          last_message_is_outgoing: true,
+          unread_count: existing?.unread_count || 0,
+          is_read: true,
+          updated_at: msg.created_at,
+          has_incoming_messages: existing?.has_incoming_messages || false,
+        })
+      }
+    }
+
+    console.log("[v0] API - After processing outgoing messages, conversationsMap size:", conversationsMap.size)
+
+    let allConversations = Array.from(conversationsMap.values()).sort(
+      (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
+    )
+
+    console.log("[v0] API - Total conversations before filter:", allConversations.length)
+
+    if (filter === "unread") {
+      allConversations = allConversations.filter((conv) => !conv.is_read)
+    } else if (filter === "conversations") {
+      allConversations = allConversations.filter((conv) => conv.has_incoming_messages)
+    }
+
+    const totalConversations = allConversations.length
+    console.log("[v0] API - Total conversations after filter:", totalConversations, "filter:", filter)
+
+    const paginatedConversations =
+      limit !== null ? allConversations.slice(offset, offset + limit) : allConversations.slice(offset)
+
+    console.log(
+      "[v0] API - Returning",
+      paginatedConversations.length,
+      "conversations (offset:",
+      offset,
+      "limit:",
+      limit || "ALL",
+      ")",
+    )
+
+    const hasMore = limit !== null ? offset + paginatedConversations.length < totalConversations : false
 
     return NextResponse.json(
       {
-        conversations: formattedConversations,
+        conversations: paginatedConversations,
         hasMore,
         nextOffset: limit !== null ? offset + limit : offset,
         total: totalConversations,
-        loaded: conversations.length,
+        loaded: paginatedConversations.length,
       },
       { status: 200 },
     )

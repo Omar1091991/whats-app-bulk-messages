@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
   try {
-    const neonClient = await createClient()
-    const { error: settingsError, data: settingsData } = await neonClient.from("api_settings").select("*").limit(1)
+    const supabaseClient = await createClient()
+    const { error: settingsError, data: settingsData } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (settingsError || !settings) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -9,11 +9,11 @@ export async function GET(request: Request) {
     const phone = searchParams.get("phone")
     const format = searchParams.get("format") || "json" // json or csv
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     if (phone) {
       // Export specific conversation
-      const { rows: messages } = await neonClient.query(
+      const { rows: messages } = await supabaseClient.query(
         `SELECT * FROM (
           SELECT 
             message_id,
@@ -84,7 +84,7 @@ export async function GET(request: Request) {
       }
     } else {
       // Export all conversations
-      const { rows: allMessages } = await neonClient.query(
+      const { rows: allMessages } = await supabaseClient.query(
         `SELECT * FROM (
           SELECT 
             message_id,

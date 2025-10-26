@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export async function GET() {
   try {
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Fetch uploaded media, ordered by most recent first
-    const { data: mediaList, error } = await neonClient
+    const { data: mediaList, error } = await supabaseClient
       .from("uploaded_media")
       .select("*")
       .order("uploaded_at", { ascending: false })
@@ -51,10 +51,10 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Media ID is required", success: false }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Delete the media record from database
-    const { error } = await neonClient.from("uploaded_media").delete().eq("id", mediaId)
+    const { error } = await supabaseClient.from("uploaded_media").delete().eq("id", mediaId)
 
     if (error) {
       if (error.code === "PGRST205" || error.message?.includes("Could not find the table")) {

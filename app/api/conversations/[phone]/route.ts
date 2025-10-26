@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 function normalizePhoneNumber(phone: string): string {
   // إزالة جميع الأحرف غير الرقمية (المسافات، الشرطات، الأقواس، +)
@@ -10,13 +10,13 @@ function normalizePhoneNumber(phone: string): string {
 export async function GET(request: Request, { params }: { params: { phone: string } }) {
   try {
     const { phone } = params
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     const normalizedPhone = normalizePhoneNumber(phone)
 
     console.log("[v0] Fetching messages for phone:", normalizedPhone)
 
-    const { data: incomingMessages, error: incomingError } = await neonClient
+    const { data: incomingMessages, error: incomingError } = await supabaseClient
       .from("webhook_messages")
       .select("*")
       .eq("from_number", normalizedPhone)
@@ -29,7 +29,7 @@ export async function GET(request: Request, { params }: { params: { phone: strin
 
     console.log("[v0] Found incoming messages:", incomingMessages?.length || 0)
 
-    const { data: sentReplies, error: sentError } = await neonClient
+    const { data: sentReplies, error: sentError } = await supabaseClient
       .from("message_history")
       .select("*")
       .eq("to_number", normalizedPhone)
@@ -85,11 +85,11 @@ export async function GET(request: Request, { params }: { params: { phone: strin
 export async function PATCH(request: Request, { params }: { params: { phone: string } }) {
   try {
     const { phone } = params
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     const normalizedPhone = normalizePhoneNumber(phone)
 
-    const { data: unreadMessages, error: fetchError } = await neonClient
+    const { data: unreadMessages, error: fetchError } = await supabaseClient
       .from("webhook_messages")
       .select("*")
       .eq("status", "unread")
@@ -104,7 +104,7 @@ export async function PATCH(request: Request, { params }: { params: { phone: str
     if (messagesToUpdate && messagesToUpdate.length > 0) {
       const messageIds = messagesToUpdate.map((msg) => msg.id)
 
-      const { error } = await neonClient.from("webhook_messages").update({ status: "read" }).in("id", messageIds)
+      const { error } = await supabaseClient.from("webhook_messages").update({ status: "read" }).in("id", messageIds)
 
       if (error) {
         console.error("[v0] Error marking messages as read:", error)

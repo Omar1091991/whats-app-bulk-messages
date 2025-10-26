@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 // Helper function to normalize phone numbers
 function normalizePhoneNumber(phone: string): string {
@@ -25,10 +25,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "يجب إدخال نص الرسالة", success: false }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Get API settings
-    const { data: settingsData, error: settingsError } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data: settingsData, error: settingsError } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (settingsError || !settings) {
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
           successCount++
 
           // Save to database
-          await neonClient.from("message_history").insert({
+          await supabaseClient.from("message_history").insert({
             message_id: data.messages?.[0]?.id,
             to_number: cleanPhone,
             template_name: null, // No template for free messages

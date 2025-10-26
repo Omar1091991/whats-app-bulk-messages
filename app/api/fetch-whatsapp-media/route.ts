@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -12,8 +12,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Media ID is required" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
-    const { data: settings } = await neonClient.from("api_settings").select("*").single()
+    const supabaseClient = await createClient()
+    const { data: settings } = await supabaseClient.from("api_settings").select("*").single()
 
     if (!settings?.access_token || !settings?.phone_number_id) {
       return NextResponse.json({ error: "WhatsApp not configured" }, { status: 500 })

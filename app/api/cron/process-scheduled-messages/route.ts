@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
 
 export const dynamic = "force-dynamic"
@@ -12,11 +12,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Fetch pending scheduled messages that are due
     const now = new Date().toISOString()
-    const { data: scheduledMessages, error: fetchError } = await neonClient
+    const { data: scheduledMessages, error: fetchError } = await supabaseClient
       .from("scheduled_messages")
       .select("*")
       .eq("status", "pending")
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     console.log("[v0] Processing", scheduledMessages.length, "scheduled messages")
 
     // Fetch API settings
-    const { data: settingsData } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data: settingsData } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (!settings) {
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     for (const scheduledMessage of scheduledMessages) {
       try {
         // Mark as processing
-        await neonClient.from("scheduled_messages").update({ status: "processing" }).eq("id", scheduledMessage.id)
+        await supabaseClient.from("scheduled_messages").update({ status: "processing" }).eq("id", scheduledMessage.id)
 
         console.log("[v0] Processing scheduled message:", scheduledMessage.id)
 
@@ -150,7 +150,7 @@ export async function GET(request: Request) {
 
               successCount++
 
-              await neonClient.from("message_history").insert({
+              await supabaseClient.from("message_history").insert({
                 message_id: messageId,
                 to_number: phoneNumber,
                 template_name: scheduledMessage.template_name,
@@ -164,7 +164,7 @@ export async function GET(request: Request) {
               errors.push(`${phoneNumber}: ${errorMessage}`)
               failureCount++
 
-              await neonClient.from("message_history").insert({
+              await supabaseClient.from("message_history").insert({
                 to_number: phoneNumber,
                 template_name: scheduledMessage.template_name,
                 message_text: templateBodyText,
@@ -191,7 +191,7 @@ export async function GET(request: Request) {
           finalStatus = "partial"
         }
 
-        await neonClient
+        await supabaseClient
           .from("scheduled_messages")
           .update({
             status: finalStatus,
@@ -223,7 +223,7 @@ export async function GET(request: Request) {
         console.error("[v0] Error processing scheduled message:", scheduledMessage.id, error)
 
         // Mark as failed
-        await neonClient
+        await supabaseClient
           .from("scheduled_messages")
           .update({
             status: "failed",

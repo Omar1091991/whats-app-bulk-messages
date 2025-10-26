@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
@@ -9,11 +9,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Phone number is required" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     const normalizedPhone = phone.replace(/\D/g, "")
 
-    const { error: msgError } = await neonClient
+    const { error: msgError } = await supabaseClient
       .from("webhook_messages")
       .update({ replied: true })
       .eq("from_number", normalizedPhone)

@@ -1,35 +1,78 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
+
+function normalizePhoneNumber(phone: string): string {
+  return phone.replace(/\D/g, "")
+}
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const filter = searchParams.get("filter") || "all"
 
-    const sql = createClient()
+    const supabaseClient = await createClient()
 
-    // بناء الاستعلام بناءً على الفلتر
-    let query = `
-      SELECT 
-        phone_number,
-        contact_name,
-        last_message_text,
-        last_message_time,
-        unread_count,
-        last_activity
-      FROM conversations
-    `
+    // جلب جميع الرسائل الواردة
+    const { data: incomingMessages, error: incomingError } = await supabaseClient
+      .from("webhook_messages")
+      .select("from_number, from_name, message_text, timestamp, replied")
+      .order("timestamp", { ascending: false })
 
-    if (filter === "unread") {
-      query += " WHERE unread_count > 0"
-    } else if (filter === "conversations") {
-      query += " WHERE has_incoming_messages = true"
+    if (incomingError) throw incomingError
+
+    // جلب جميع الرسائل الصادرة
+    const { data: outgoingMessages, error: outgoingError } = await supabaseClient
+      .from("message_history")
+      .select("to_number, message_text, created_at, status")
+      .order("created_at", { ascending: false })
+
+    if (outgoingError) throw outgoingError
+
+    // بناء المحادثات
+    const conversationsMap = new Map<string, any>()
+
+    for (const msg of incomingMessages || []) {
+      const normalizedPhone = normalizePhoneNumber(msg.from_number)
+      const existing = conversationsMap.get(normalizedPhone)
+
+      if (!existing || new Date(msg.timestamp) > new Date(existing.last_message_time)) {
+        conversationsMap.set(normalizedPhone, {
+          phone_number: msg.from_number,
+          contact_name: msg.from_name || msg.from_number,
+          last_message_text: msg.message_text,
+          last_message_time: msg.timestamp,
+          unread_count: msg.replied ? 0 : 1,
+          has_incoming_messages: true,
+        })
+      }
     }
 
-    query += " ORDER BY last_activity DESC"
+    for (const msg of outgoingMessages || []) {
+      const normalizedPhone = normalizePhoneNumber(msg.to_number)
+      const existing = conversationsMap.get(normalizedPhone)
 
-    const result = await sql(query)
-    const conversations = result.rows
+      if (!existing || new Date(msg.created_at) > new Date(existing.last_message_time)) {
+        conversationsMap.set(normalizedPhone, {
+          phone_number: msg.to_number,
+          contact_name: existing?.contact_name || msg.to_number,
+          last_message_text: msg.message_text,
+          last_message_time: msg.created_at,
+          unread_count: existing?.unread_count || 0,
+          has_incoming_messages: existing?.has_incoming_messages || false,
+        })
+      }
+    }
+
+    let conversations = Array.from(conversationsMap.values()).sort(
+      (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
+    )
+
+    // تطبيق الفلتر
+    if (filter === "unread") {
+      conversations = conversations.filter((conv) => conv.unread_count > 0)
+    } else if (filter === "conversations") {
+      conversations = conversations.filter((conv) => conv.has_incoming_messages)
+    }
 
     // إنشاء محتوى HTML بسيط يمكن طباعته كـ PDF
     const htmlContent = `
@@ -103,6 +146,12 @@ export async function GET(request: NextRequest) {
       color: #666;
       font-size: 12px;
     }
+    @media print {
+      body { background: white; }
+      .header { background: #00a884 !important; -webkit-print-color-adjust: exact; }
+      th { background: #202c33 !important; -webkit-print-color-adjust: exact; }
+      .unread-badge { background: #25d366 !important; -webkit-print-color-adjust: exact; }
+    }
   </style>
 </head>
 <body>
@@ -166,25 +215,69 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "يجب تحديد أرقام الهواتف" }, { status: 400 })
     }
 
-    const sql = createClient()
+    const supabaseClient = await createClient()
+    const normalizedPhones = phoneNumbers.map((phone: string) => normalizePhoneNumber(phone))
 
-    // استعلام للحصول على المحادثات المحددة
-    const placeholders = phoneNumbers.map((_, i) => `$${i + 1}`).join(",")
-    const query = `
-      SELECT 
-        phone_number,
-        contact_name,
-        last_message_text,
-        last_message_time,
-        unread_count,
-        last_activity
-      FROM conversations
-      WHERE phone_number IN (${placeholders})
-      ORDER BY last_activity DESC
-    `
+    // جلب الرسائل الواردة للأرقام المحددة
+    const { data: incomingMessages, error: incomingError } = await supabaseClient
+      .from("webhook_messages")
+      .select("from_number, from_name, message_text, timestamp, replied")
+      .order("timestamp", { ascending: false })
 
-    const result = await sql(query, phoneNumbers)
-    const conversations = result.rows
+    if (incomingError) throw incomingError
+
+    // جلب الرسائل الصادرة للأرقام المحددة
+    const { data: outgoingMessages, error: outgoingError } = await supabaseClient
+      .from("message_history")
+      .select("to_number, message_text, created_at, status")
+      .order("created_at", { ascending: false })
+
+    if (outgoingError) throw outgoingError
+
+    // تصفية الرسائل للأرقام المحددة فقط
+    const filteredIncoming = (incomingMessages || []).filter((msg) =>
+      normalizedPhones.includes(normalizePhoneNumber(msg.from_number)),
+    )
+    const filteredOutgoing = (outgoingMessages || []).filter((msg) =>
+      normalizedPhones.includes(normalizePhoneNumber(msg.to_number)),
+    )
+
+    // بناء المحادثات
+    const conversationsMap = new Map<string, any>()
+
+    for (const msg of filteredIncoming) {
+      const normalizedPhone = normalizePhoneNumber(msg.from_number)
+      const existing = conversationsMap.get(normalizedPhone)
+
+      if (!existing || new Date(msg.timestamp) > new Date(existing.last_message_time)) {
+        conversationsMap.set(normalizedPhone, {
+          phone_number: msg.from_number,
+          contact_name: msg.from_name || msg.from_number,
+          last_message_text: msg.message_text,
+          last_message_time: msg.timestamp,
+          unread_count: msg.replied ? 0 : 1,
+        })
+      }
+    }
+
+    for (const msg of filteredOutgoing) {
+      const normalizedPhone = normalizePhoneNumber(msg.to_number)
+      const existing = conversationsMap.get(normalizedPhone)
+
+      if (!existing || new Date(msg.created_at) > new Date(existing.last_message_time)) {
+        conversationsMap.set(normalizedPhone, {
+          phone_number: msg.to_number,
+          contact_name: existing?.contact_name || msg.to_number,
+          last_message_text: msg.message_text,
+          last_message_time: msg.created_at,
+          unread_count: existing?.unread_count || 0,
+        })
+      }
+    }
+
+    const conversations = Array.from(conversationsMap.values()).sort(
+      (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
+    )
 
     // إنشاء محتوى HTML
     const htmlContent = `
@@ -257,6 +350,12 @@ export async function POST(request: NextRequest) {
       padding: 15px;
       color: #666;
       font-size: 12px;
+    }
+    @media print {
+      body { background: white; }
+      .header { background: #00a884 !important; -webkit-print-color-adjust: exact; }
+      th { background: #202c33 !important; -webkit-print-color-adjust: exact; }
+      .unread-badge { background: #25d366 !important; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>

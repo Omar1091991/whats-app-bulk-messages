@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export async function GET() {
   try {
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { data, error } = await neonClient
+    const { data, error } = await supabaseClient
       .from("webhook_messages")
       .select("*")
       .order("status", { ascending: true }) // unread comes before read alphabetically
@@ -45,9 +45,14 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Message ID is required" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { data, error } = await neonClient.from("webhook_messages").update({ status }).eq("id", id).select().single()
+    const { data, error } = await supabaseClient
+      .from("webhook_messages")
+      .update({ status })
+      .eq("id", id)
+      .select()
+      .single()
 
     if (error) {
       console.error("[v0] Error updating message:", error)

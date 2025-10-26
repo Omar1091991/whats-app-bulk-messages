@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 function normalizePhoneNumber(phone: string): string {
   const cleaned = phone.replace(/\D/g, "")
@@ -9,11 +9,21 @@ function normalizePhoneNumber(phone: string): string {
 
 export async function POST(request: Request) {
   try {
-    const { phoneNumbers, templateId, imageUrl } = await request.json()
+    const { phoneNumbers, templateId, imageUrl, mediaId, mediaInputType, mediaValue } = await request.json()
 
     console.log("[v0] ===== بدء إرسال رسائل جماعية =====")
     console.log("[v0] عدد الأرقام:", phoneNumbers?.length)
     console.log("[v0] معرف القالب:", templateId)
+    console.log("[v0] رابط الصورة:", imageUrl)
+    console.log("[v0] Media ID (مباشر):", mediaId)
+    console.log("[v0] Media Input Type:", mediaInputType)
+    console.log("[v0] Media Value:", mediaValue)
+
+    const finalMediaId = mediaId || (mediaInputType === "id" ? mediaValue : null)
+    const finalImageUrl = imageUrl || (mediaInputType === "url" ? mediaValue : null)
+
+    console.log("[v0] Final Media ID:", finalMediaId)
+    console.log("[v0] Final Image URL:", finalImageUrl)
 
     if (!phoneNumbers || !Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
       console.error("[v0] خطأ: أرقام الهاتف مفقودة أو غير صحيحة")
@@ -25,7 +35,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing template ID", success: false }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     console.log("[v0] جاري فحص حدود الإرسال من Meta...")
     const rateLimitsResponse = await fetch(`${request.url.split("/api/")[0]}/api/meta-rate-limits`)
@@ -89,7 +99,7 @@ export async function POST(request: Request) {
     }
 
     console.log("[v0] جاري جلب إعدادات API...")
-    const { data: settingsData, error: settingsError } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data: settingsData, error: settingsError } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (settingsError || !settings) {
@@ -97,7 +107,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "API settings not configured", success: false }, { status: 500 })
     }
 
-    // Fetch template details
     const templatesUrl = getWhatsAppApiUrl(`${settings.business_account_id}/message_templates`)
     const templatesResponse = await fetch(templatesUrl, {
       headers: {
@@ -130,6 +139,7 @@ export async function POST(request: Request) {
     }
 
     console.log("[v0] تم العثور على القالب:", template.name)
+    console.log("[v0] مكونات القالب:", JSON.stringify(template.components, null, 2))
 
     const bodyComponent = template.components?.find((c: { type: string }) => c.type === "BODY")
     const templateBodyText = bodyComponent?.text || ""
@@ -140,56 +150,79 @@ export async function POST(request: Request) {
     const components = []
     const headerComponent = template.components?.find((c: { type: string; format?: string }) => c.type === "HEADER")
 
+    console.log("[v0] Header component:", JSON.stringify(headerComponent, null, 2))
+
     if (headerComponent?.format === "IMAGE") {
-      if (!imageUrl) {
-        return NextResponse.json({ error: "This template requires an image URL", success: false }, { status: 400 })
+      if (!finalImageUrl && !finalMediaId) {
+        console.error("[v0] ❌ القالب يحتاج إلى صورة لكن لم يتم توفير صورة")
+        return NextResponse.json(
+          { error: "This template requires an image URL or Media ID", success: false },
+          { status: 400 },
+        )
       }
 
-      const invalidDomains = ["imageshack.com", "imagizer.imageshack.com", "tinypic.com", "photobucket.com"]
+      if (finalMediaId) {
+        components.push({
+          type: "header",
+          parameters: [
+            {
+              type: "image",
+              image: {
+                id: finalMediaId,
+              },
+            },
+          ],
+        })
 
-      try {
-        const url = new URL(imageUrl)
-        if (invalidDomains.some((domain) => url.hostname.includes(domain))) {
-          console.error("[v0] ❌ رابط صورة غير صالح:", imageUrl)
+        console.log("[v0] ✅ تم إضافة header مع Media ID:", finalMediaId)
+      } else if (finalImageUrl) {
+        const invalidDomains = ["imageshack.com", "imagizer.imageshack.com", "tinypic.com", "photobucket.com"]
+
+        try {
+          const url = new URL(finalImageUrl)
+          if (invalidDomains.some((domain) => url.hostname.includes(domain))) {
+            console.error("[v0] ❌ رابط صورة غير صالح:", finalImageUrl)
+            return NextResponse.json(
+              {
+                error: `رابط الصورة من ${url.hostname} غير مدعوم. استخدم رابطاً مباشراً ينتهي بـ .jpg أو .png أو .gif، أو ارفع الصورة مباشرة إلى WhatsApp.`,
+                errorType: "INVALID_IMAGE_URL",
+                success: false,
+              },
+              { status: 400 },
+            )
+          }
+        } catch (e) {
+          console.error("[v0] ❌ رابط صورة غير صحيح:", finalImageUrl)
           return NextResponse.json(
             {
-              error: `رابط الصورة من ${url.hostname} غير مدعوم. استخدم رابطاً مباشراً ينتهي بـ .jpg أو .png أو .gif، أو ارفع الصورة مباشرة إلى WhatsApp.`,
-              errorType: "INVALID_IMAGE_URL",
+              error: "رابط الصورة غير صحيح",
+              errorType: "INVALID_URL",
               success: false,
             },
             { status: 400 },
           )
         }
-      } catch (e) {
-        console.error("[v0] ❌ رابط صورة غير صحيح:", imageUrl)
-        return NextResponse.json(
-          {
-            error: "رابط الصورة غير صحيح",
-            errorType: "INVALID_URL",
-            success: false,
-          },
-          { status: 400 },
-        )
-      }
 
-      components.push({
-        type: "header",
-        parameters: [
-          {
-            type: "image",
-            image: {
-              link: imageUrl,
+        components.push({
+          type: "header",
+          parameters: [
+            {
+              type: "image",
+              image: {
+                link: finalImageUrl,
+              },
             },
-          },
-        ],
-      })
+          ],
+        })
 
-      console.log("[v0] Adding image header with URL:", imageUrl)
+        console.log("[v0] ✅ تم إضافة header مع URL:", finalImageUrl)
+      }
     }
+
+    console.log("[v0] Components to send:", JSON.stringify(components, null, 2))
 
     const url = getWhatsAppApiUrl(`${settings.phone_number_id}/messages`)
 
-    // Send messages with a small delay between each to avoid rate limiting
     const results = []
     let successCount = 0
     let failureCount = 0
@@ -209,7 +242,7 @@ export async function POST(request: Request) {
             language: { code: string }
             components?: Array<{
               type: string
-              parameters: Array<{ type: string; image: { link: string } }>
+              parameters: Array<{ type: string; image: { link?: string; id?: string } }>
             }>
           }
         } = {
@@ -228,6 +261,8 @@ export async function POST(request: Request) {
           messagePayload.template.components = components
         }
 
+        console.log(`[v0] Message payload for ${phoneNumber}:`, JSON.stringify(messagePayload, null, 2))
+
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -237,8 +272,11 @@ export async function POST(request: Request) {
           body: JSON.stringify(messagePayload),
         })
 
+        const responseText = await response.text()
+        console.log(`[v0] WhatsApp API response for ${phoneNumber}:`, responseText)
+
         if (response.ok) {
-          const data = await response.json()
+          const data = JSON.parse(responseText)
           const messageId = data.messages?.[0]?.id
 
           console.log(`[v0] ✅ تم إرسال الرسالة بنجاح إلى ${phoneNumber}، معرف الرسالة: ${messageId}`)
@@ -246,17 +284,17 @@ export async function POST(request: Request) {
           results.push({ phoneNumber, success: true, messageId })
           successCount++
 
-          await neonClient.from("message_history").insert({
+          await supabaseClient.from("message_history").insert({
             message_id: messageId,
             to_number: normalizedPhone,
             template_name: template.name,
             message_text: templateBodyText,
-            media_url: imageUrl || null,
+            media_url: finalMediaId || finalImageUrl || null,
             message_type: "bulk_instant",
             status: "sent",
           })
         } else {
-          const error = await response.json()
+          const error = JSON.parse(responseText)
           console.error(`[v0] ❌ فشل إرسال الرسالة إلى ${phoneNumber}:`, error)
 
           if (error.error?.code === 190 || error.error?.type === "OAuthException") {
@@ -273,18 +311,17 @@ export async function POST(request: Request) {
           results.push({ phoneNumber, success: false, error: error.error?.message })
           failureCount++
 
-          await neonClient.from("message_history").insert({
+          await supabaseClient.from("message_history").insert({
             to_number: normalizedPhone,
             template_name: template.name,
             message_text: templateBodyText,
-            media_url: imageUrl || null,
+            media_url: finalMediaId || finalImageUrl || null,
             message_type: "bulk_instant",
             status: "failed",
             error_message: error.error?.message,
           })
         }
 
-        // Small delay to avoid rate limiting (100ms between messages)
         await new Promise((resolve) => setTimeout(resolve, 100))
       } catch (error) {
         console.error(`[v0] ❌ خطأ في إرسال الرسالة إلى ${phoneNumber}:`, error)

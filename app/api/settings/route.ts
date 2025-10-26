@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export async function GET() {
   try {
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { data, error } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data, error } = await supabaseClient.from("api_settings").select("*").limit(1)
 
     if (error) {
       console.error("[v0] Error fetching API settings:", error)
@@ -21,7 +21,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
     const body = await request.json()
 
     const { business_account_id, phone_number_id, access_token, webhook_verify_token } = body
@@ -34,11 +34,11 @@ export async function POST(request: Request) {
       webhook_verify_token ||
       `whatsapp_verify_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`
 
-    const { data: existing } = await neonClient.from("api_settings").select("id").limit(1)
+    const { data: existing } = await supabaseClient.from("api_settings").select("id").limit(1)
 
     let result
     if (existing && existing.length > 0) {
-      result = await neonClient
+      result = await supabaseClient
         .from("api_settings")
         .update({
           business_account_id,
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
         .eq("id", existing[0].id)
         .select()
     } else {
-      result = await neonClient
+      result = await supabaseClient
         .from("api_settings")
         .insert({
           business_account_id,

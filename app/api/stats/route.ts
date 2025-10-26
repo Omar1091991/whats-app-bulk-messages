@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -10,10 +10,14 @@ export async function GET(request: Request) {
     const startDate = searchParams.get("startDate")
     const endDate = searchParams.get("endDate")
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     if (date) {
-      const { data: dailyStats } = await neonClient.from("daily_statistics").select("*").eq("date", date).maybeSingle()
+      const { data: dailyStats } = await supabaseClient
+        .from("daily_statistics")
+        .select("*")
+        .eq("date", date)
+        .maybeSingle()
 
       if (!dailyStats) {
         const startOfDay = new Date(date)
@@ -24,55 +28,55 @@ export async function GET(request: Request) {
         const startISO = startOfDay.toISOString()
         const endISO = endOfDay.toISOString()
 
-        const { count: totalSent } = await neonClient
+        const { count: totalSent } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
 
-        const { count: successfulMessages } = await neonClient
+        const { count: successfulMessages } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
           .in("status", ["delivered", "sent", "read"])
 
-        const { count: failedMessages } = await neonClient
+        const { count: failedMessages } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
           .eq("status", "failed")
 
-        const { count: singleMessages } = await neonClient
+        const { count: singleMessages } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
           .eq("message_type", "single")
 
-        const { count: bulkInstantMessages } = await neonClient
+        const { count: bulkInstantMessages } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
           .eq("message_type", "bulk_instant")
 
-        const { count: bulkScheduledMessages } = await neonClient
+        const { count: bulkScheduledMessages } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
           .eq("message_type", "bulk_scheduled")
 
-        const { count: replyMessages } = await neonClient
+        const { count: replyMessages } = await supabaseClient
           .from("message_history")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
           .lte("created_at", endISO)
           .eq("message_type", "reply")
 
-        const { data: templates } = await neonClient
+        const { data: templates } = await supabaseClient
           .from("message_history")
           .select("template_name")
           .gte("created_at", startISO)
@@ -81,7 +85,7 @@ export async function GET(request: Request) {
 
         const uniqueTemplates = new Set(templates?.map((t) => t.template_name).filter(Boolean))
 
-        const { count: incomingMessages } = await neonClient
+        const { count: incomingMessages } = await supabaseClient
           .from("webhook_messages")
           .select("*", { count: "exact", head: true })
           .gte("created_at", startISO)
@@ -129,7 +133,7 @@ export async function GET(request: Request) {
     }
 
     if (startDate && endDate) {
-      const { data: rangeStats, error } = await neonClient
+      const { data: rangeStats, error } = await supabaseClient
         .from("daily_statistics")
         .select("*")
         .gte("date", startDate)
@@ -172,41 +176,43 @@ export async function GET(request: Request) {
     }
 
     // حساب الرسائل المرسلة فعلياً من message_history فقط
-    const { count: totalSent } = await neonClient.from("message_history").select("*", { count: "exact", head: true })
+    const { count: totalSent } = await supabaseClient
+      .from("message_history")
+      .select("*", { count: "exact", head: true })
 
-    const { count: singleMessages } = await neonClient
+    const { count: singleMessages } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .eq("message_type", "single")
 
-    const { count: bulkInstantMessages } = await neonClient
+    const { count: bulkInstantMessages } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .eq("message_type", "bulk_instant")
 
-    const { count: bulkScheduledMessages } = await neonClient
+    const { count: bulkScheduledMessages } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .eq("message_type", "bulk_scheduled")
 
-    const { count: replyMessages } = await neonClient
+    const { count: replyMessages } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .eq("message_type", "reply")
 
-    const { count: successfulMessages } = await neonClient
+    const { count: successfulMessages } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .in("status", ["delivered", "sent", "read"])
 
-    const { data: templates } = await neonClient
+    const { data: templates } = await supabaseClient
       .from("message_history")
       .select("template_name")
       .not("template_name", "is", null)
 
     const uniqueTemplates = new Set(templates?.map((t) => t.template_name).filter(Boolean))
 
-    const { count: incomingMessages } = await neonClient
+    const { count: incomingMessages } = await supabaseClient
       .from("webhook_messages")
       .select("*", { count: "exact", head: true })
 
@@ -214,12 +220,12 @@ export async function GET(request: Request) {
     today.setHours(0, 0, 0, 0)
     const todayISO = today.toISOString()
 
-    const { count: todaySent } = await neonClient
+    const { count: todaySent } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .gte("created_at", todayISO)
 
-    const { count: todaySuccessful } = await neonClient
+    const { count: todaySuccessful } = await supabaseClient
       .from("message_history")
       .select("*", { count: "exact", head: true })
       .gte("created_at", todayISO)
@@ -229,24 +235,24 @@ export async function GET(request: Request) {
     endOfToday.setHours(23, 59, 59, 999)
     const endOfTodayISO = endOfToday.toISOString()
 
-    const { count: pendingScheduled } = await neonClient
+    const { count: pendingScheduled } = await supabaseClient
       .from("scheduled_messages")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending")
 
-    const { count: todayScheduled } = await neonClient
+    const { count: todayScheduled } = await supabaseClient
       .from("scheduled_messages")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending")
       .gte("scheduled_time", todayISO)
       .lte("scheduled_time", endOfTodayISO)
 
-    const { count: completedScheduled } = await neonClient
+    const { count: completedScheduled } = await supabaseClient
       .from("scheduled_messages")
       .select("*", { count: "exact", head: true })
       .eq("status", "sent")
 
-    const { count: failedScheduled } = await neonClient
+    const { count: failedScheduled } = await supabaseClient
       .from("scheduled_messages")
       .select("*", { count: "exact", head: true })
       .eq("status", "failed")

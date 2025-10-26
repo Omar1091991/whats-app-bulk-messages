@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -9,13 +9,13 @@ export async function GET(request: Request) {
   const filter = searchParams.get("filter") || "all"
 
   try {
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // جلب جميع المحادثات
-    const { rows: conversations } = await neonClient.query(
-      `
-      WITH all_messages AS (
-        SELECT 
+    const { data: conversations, error } = await supabaseClient
+      .from("webhook_messages")
+      .select(
+        `
           REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone,
           from_number as phone_number,
           COALESCE(from_name, from_number) as contact_name,
@@ -24,70 +24,100 @@ export async function GET(request: Request) {
           false as is_outgoing,
           NOT replied as is_unread,
           'incoming' as source
-        FROM webhook_messages
-        
-        UNION ALL
-        
-        SELECT 
-          REGEXP_REPLACE(to_number, '[^0-9]', '', 'g') as normalized_phone,
-          to_number as phone_number,
-          to_number as contact_name,
-          message_text,
-          created_at as message_time,
-          true as is_outgoing,
-          false as is_unread,
-          'outgoing' as source
-        FROM message_history
-      ),
-      latest_per_phone AS (
-        SELECT DISTINCT ON (normalized_phone)
-          normalized_phone,
-          phone_number,
-          contact_name,
-          message_text,
-          message_time,
-          is_outgoing,
-          is_unread,
-          source
-        FROM all_messages
-        ORDER BY normalized_phone, message_time DESC
-      ),
-      unread_counts AS (
-        SELECT 
+        `,
+      )
+      .union(
+        supabaseClient.from("message_history").select(
+          `
+              REGEXP_REPLACE(to_number, '[^0-9]', '', 'g') as normalized_phone,
+              to_number as phone_number,
+              to_number as contact_name,
+              message_text,
+              created_at as message_time,
+              true as is_outgoing,
+              false as is_unread,
+              'outgoing' as source
+            `,
+        ),
+      )
+      .then(({ data }) => {
+        return supabaseClient
+          .from("all_messages")
+          .select(
+            `
+              normalized_phone,
+              phone_number,
+              contact_name,
+              message_text,
+              message_time,
+              is_outgoing,
+              is_unread,
+              source
+            `,
+          )
+          .distinct("normalized_phone")
+          .order("message_time", { ascending: false })
+          .then(({ data }) => {
+            return data
+          })
+      })
+
+    if (error) {
+      throw error
+    }
+
+    const unreadCounts = await supabaseClient
+      .from("webhook_messages")
+      .select(
+        `
           REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone,
           COUNT(*) FILTER (WHERE NOT replied) as unread_count
-        FROM webhook_messages
-        GROUP BY REGEXP_REPLACE(from_number, '[^0-9]', '', 'g')
-      ),
-      has_incoming AS (
-        SELECT DISTINCT
+        `,
+      )
+      .groupBy("normalized_phone")
+
+    const hasIncoming = await supabaseClient
+      .from("webhook_messages")
+      .select(
+        `
           REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone,
           true as has_incoming_messages
-        FROM webhook_messages
+        `,
       )
-      SELECT 
-        l.phone_number,
-        l.contact_name,
-        COALESCE(l.message_text, '') as last_message_text,
-        l.message_time as last_message_time,
-        l.is_outgoing as last_message_is_outgoing,
-        COALESCE(u.unread_count, 0)::int as unread_count,
-        l.message_time as updated_at,
-        NOT l.is_unread as is_read,
-        COALESCE(h.has_incoming_messages, false) as has_incoming_messages
-      FROM latest_per_phone l
-      LEFT JOIN unread_counts u ON l.normalized_phone = u.normalized_phone
-      LEFT JOIN has_incoming h ON l.normalized_phone = h.normalized_phone
-      ${filter === "unread" ? "WHERE COALESCE(u.unread_count, 0) > 0" : ""}
-      ${filter === "conversations" ? "WHERE COALESCE(h.has_incoming_messages, false) = true" : ""}
-      ORDER BY l.message_time DESC
-    `,
-    )
+      .distinct("normalized_phone")
+
+    const formattedConversations = conversations.map((conv: any) => {
+      const unreadCount =
+        unreadCounts.find((uc: any) => uc.normalized_phone === conv.normalized_phone)?.unread_count || 0
+      const hasIncomingMessages = hasIncoming.some((hi: any) => hi.normalized_phone === conv.normalized_phone)
+
+      return {
+        phone_number: conv.phone_number,
+        contact_name: conv.contact_name,
+        last_message_text: conv.message_text,
+        last_message_time: new Date(conv.message_time).toISOString(),
+        last_message_is_outgoing: conv.is_outgoing,
+        unread_count: unreadCount,
+        is_read: !conv.is_unread,
+        updated_at: new Date(conv.message_time).toISOString(),
+        has_incoming_messages: hasIncomingMessages,
+      }
+    })
+
+    const filteredConversations = formattedConversations.filter((conv: any) => {
+      if (filter === "unread") {
+        return conv.unread_count > 0
+      }
+      if (filter === "conversations") {
+        return conv.has_incoming_messages
+      }
+      return true
+    })
 
     if (format === "csv") {
       // تصدير CSV
       const csvHeader = "رقم الهاتف,اسم جهة الاتصال,آخر رسالة,وقت آخر رسالة,عدد الرسائل غير المقروءة,نوع آخر رسالة\n"
-      const csvRows = conversations
+      const csvRows = filteredConversations
         .map((conv: any) => {
           const phoneNumber = conv.phone_number
           const contactName = conv.contact_name.replace(/,/g, " ")
@@ -110,24 +140,12 @@ export async function GET(request: Request) {
       })
     } else {
       // تصدير JSON
-      const formattedConversations = conversations.map((conv: any) => ({
-        phone_number: conv.phone_number,
-        contact_name: conv.contact_name,
-        last_message_text: conv.last_message_text,
-        last_message_time: new Date(conv.last_message_time).toISOString(),
-        last_message_is_outgoing: conv.last_message_is_outgoing,
-        unread_count: conv.unread_count,
-        is_read: conv.is_read,
-        updated_at: new Date(conv.updated_at).toISOString(),
-        has_incoming_messages: conv.has_incoming_messages,
-      }))
-
       return NextResponse.json(
         {
           exported_at: new Date().toISOString(),
-          total_conversations: formattedConversations.length,
+          total_conversations: filteredConversations.length,
           filter: filter,
-          conversations: formattedConversations,
+          conversations: filteredConversations,
         },
         {
           headers: {

@@ -18,7 +18,6 @@ import {
   Download,
   FileDown,
   FileSpreadsheet,
-  FileText,
   CheckSquare,
   Square,
   X,
@@ -432,7 +431,7 @@ export function WhatsAppInbox() {
     setIsExportMode(true)
   }
 
-  const exportSelectedConversations = async (format: "excel" | "pdf") => {
+  const exportSelectedConversations = async () => {
     if (selectedConversations.size === 0) {
       toast({
         title: "تنبيه",
@@ -445,7 +444,7 @@ export function WhatsAppInbox() {
     setIsExporting(true)
     try {
       const phoneNumbers = Array.from(selectedConversations)
-      const url = `/api/conversations/export-${format}`
+      const url = `/api/conversations/export-excel`
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -458,7 +457,7 @@ export function WhatsAppInbox() {
       const downloadUrl = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = downloadUrl
-      a.download = `conversations-${new Date().toISOString().split("T")[0]}.${format === "excel" ? "xlsx" : "pdf"}`
+      a.download = `conversations-${new Date().toISOString().split("T")[0]}.xlsx`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(downloadUrl)
@@ -466,7 +465,7 @@ export function WhatsAppInbox() {
 
       toast({
         title: "تم التصدير بنجاح",
-        description: `تم تصدير ${selectedConversations.size} محادثة بصيغة ${format === "excel" ? "Excel" : "PDF"}`,
+        description: `تم تصدير ${selectedConversations.size} محادثة بصيغة Excel`,
       })
 
       cancelExportMode()
@@ -481,10 +480,10 @@ export function WhatsAppInbox() {
     }
   }
 
-  const exportAllConversationsNew = async (format: "excel" | "pdf") => {
+  const exportAllConversations = async () => {
     setIsExporting(true)
     try {
-      const url = `/api/conversations/export-${format}?filter=${activeFilter}`
+      const url = `/api/conversations/export-excel?filter=${activeFilter}`
       const response = await fetch(url)
 
       if (!response.ok) throw new Error("فشل في تصدير المحادثات")
@@ -493,7 +492,7 @@ export function WhatsAppInbox() {
       const downloadUrl = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = downloadUrl
-      a.download = `all-conversations-${new Date().toISOString().split("T")[0]}.${format === "excel" ? "xlsx" : "pdf"}`
+      a.download = `all-conversations-${new Date().toISOString().split("T")[0]}.csv`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(downloadUrl)
@@ -501,8 +500,90 @@ export function WhatsAppInbox() {
 
       toast({
         title: "تم التصدير بنجاح",
-        description: `تم تصدير ${totalConversations} محادثة بصيغة ${format === "excel" ? "Excel" : "PDF"}`,
+        description: `تم تصدير ${totalConversations} محادثة بصيغة Excel`,
       })
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "فشل في تصدير المحادثات",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const exportAllConversationsPDF = async () => {
+    setIsExporting(true)
+    try {
+      const url = `/api/conversations/export-pdf?filter=${activeFilter}`
+      const response = await fetch(url)
+
+      if (!response.ok) throw new Error("فشل في تصدير المحادثات")
+
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = downloadUrl
+      a.download = `all-conversations-${new Date().toISOString().split("T")[0]}.html`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      document.body.removeChild(a)
+
+      toast({
+        title: "تم التصدير بنجاح",
+        description: `تم تصدير ${totalConversations} محادثة بصيغة PDF`,
+      })
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "فشل في تصدير المحادثات",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const exportSelectedConversationsPDF = async () => {
+    if (selectedConversations.size === 0) {
+      toast({
+        title: "تنبيه",
+        description: "الرجاء تحديد محادثة واحدة على الأقل",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsExporting(true)
+    try {
+      const phoneNumbers = Array.from(selectedConversations)
+      const url = `/api/conversations/export-pdf`
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNumbers }),
+      })
+
+      if (!response.ok) throw new Error("فشل في تصدير المحادثات")
+
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = downloadUrl
+      a.download = `selected-conversations-${new Date().toISOString().split("T")[0]}.html`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      document.body.removeChild(a)
+
+      toast({
+        title: "تم التصدير بنجاح",
+        description: `تم تصدير ${selectedConversations.size} محادثة بصيغة PDF`,
+      })
+
+      cancelExportMode()
     } catch (error) {
       toast({
         title: "خطأ",
@@ -618,7 +699,7 @@ export function WhatsAppInbox() {
                 <p className="text-[10px] text-[#8696a0] font-medium">تصدير الكل ({totalConversations})</p>
               </div>
               <button
-                onClick={() => exportAllConversationsNew("excel")}
+                onClick={exportAllConversations}
                 disabled={isExporting}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
               >
@@ -626,11 +707,11 @@ export function WhatsAppInbox() {
                 <span>تصدير Excel</span>
               </button>
               <button
-                onClick={() => exportAllConversationsNew("pdf")}
+                onClick={exportAllConversationsPDF}
                 disabled={isExporting}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
               >
-                <FileText className="h-4 w-4 text-red-500" />
+                <FileDown className="h-4 w-4 text-red-500" />
                 <span>تصدير PDF</span>
               </button>
             </div>
@@ -663,8 +744,9 @@ export function WhatsAppInbox() {
               </div>
               <div className="flex items-center gap-2">
                 {selectedConversations.size > 0 && (
-                  <div className="relative group">
+                  <>
                     <Button
+                      onClick={exportSelectedConversations}
                       size="sm"
                       className="bg-white text-[#00a884] hover:bg-white/90 h-8 px-3 text-xs font-medium"
                       disabled={isExporting}
@@ -673,30 +755,27 @@ export function WhatsAppInbox() {
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
                         <>
-                          <FileDown className="h-3 w-3 ml-1" />
-                          تصدير
+                          <FileSpreadsheet className="h-3 w-3 ml-1" />
+                          Excel
                         </>
                       )}
                     </Button>
-                    <div className="absolute left-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 min-w-[150px]">
-                      <button
-                        onClick={() => exportSelectedConversations("excel")}
-                        disabled={isExporting}
-                        className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
-                      >
-                        <FileSpreadsheet className="h-4 w-4 text-green-500" />
-                        <span>Excel</span>
-                      </button>
-                      <button
-                        onClick={() => exportSelectedConversations("pdf")}
-                        disabled={isExporting}
-                        className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
-                      >
-                        <FileText className="h-4 w-4 text-red-500" />
-                        <span>PDF</span>
-                      </button>
-                    </div>
-                  </div>
+                    <Button
+                      onClick={exportSelectedConversationsPDF}
+                      size="sm"
+                      className="bg-white text-red-500 hover:bg-white/90 h-8 px-3 text-xs font-medium"
+                      disabled={isExporting}
+                    >
+                      {isExporting ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <FileDown className="h-3 w-3 ml-1" />
+                          PDF
+                        </>
+                      )}
+                    </Button>
+                  </>
                 )}
                 <Button
                   onClick={cancelExportMode}

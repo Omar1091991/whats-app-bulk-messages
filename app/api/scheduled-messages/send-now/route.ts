@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 import { getWhatsAppApiUrl } from "@/lib/whatsapp-config"
 
 export const dynamic = "force-dynamic"
@@ -12,13 +12,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Update status to processing
-    await neonClient.from("scheduled_messages").update({ status: "processing" }).eq("id", messageId)
+    await supabaseClient.from("scheduled_messages").update({ status: "processing" }).eq("id", messageId)
 
     // Fetch API settings
-    const { data: settingsData } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data: settingsData } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (!settings) {
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
           successCount++
 
           // Store in message history
-          await neonClient.from("message_history").insert({
+          await supabaseClient.from("message_history").insert({
             to_number: phoneNumber,
             message_id: messageId,
             template_name: templateName,
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
           failedCount++
 
           // Store failed message in history
-          await neonClient.from("message_history").insert({
+          await supabaseClient.from("message_history").insert({
             to_number: phoneNumber,
             template_name: templateName,
             message_type: "bulk_scheduled",
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
       finalStatus = "partial"
     }
 
-    await neonClient
+    await supabaseClient
       .from("scheduled_messages")
       .update({
         status: finalStatus,

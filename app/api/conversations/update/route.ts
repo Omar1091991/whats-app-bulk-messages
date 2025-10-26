@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 
 // Helper function to normalize phone numbers
@@ -15,11 +15,10 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const supabase = await createClient()
+      const supabaseClient = await createClient()
       const normalizedPhone = normalizePhoneNumber(phone)
 
-      // Try to access the conversations table
-      const { data: existing, error: selectError } = await supabase
+      const { data: existing, error: selectError } = await supabaseClient
         .from("conversations")
         .select("*")
         .eq("phone_number", normalizedPhone)
@@ -54,7 +53,7 @@ export async function POST(request: NextRequest) {
           updateData.unread_count = (existing.unread_count || 0) + 1
         }
 
-        const { error: updateError } = await supabase
+        const { error: updateError } = await supabaseClient
           .from("conversations")
           .update(updateData)
           .eq("phone_number", normalizedPhone)
@@ -67,7 +66,7 @@ export async function POST(request: NextRequest) {
         }
       } else {
         // Create new conversation
-        const { error: insertError } = await supabase.from("conversations").insert({
+        const { error: insertError } = await supabaseClient.from("conversations").insert({
           phone_number: normalizedPhone,
           contact_name: contactName,
           ...updateData,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/neon/server"
+import { createClient } from "@/lib/supabase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -24,10 +24,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Scheduled time must be in the future" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Fetch template details to get name and language
-    const { data: settingsData } = await neonClient.from("api_settings").select("*").limit(1)
+    const { data: settingsData } = await supabaseClient.from("api_settings").select("*").limit(1)
     const settings = settingsData?.[0]
 
     if (!settings) {
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     }
 
     // Insert scheduled message into database
-    const { data, error } = await neonClient
+    const { data, error } = await supabaseClient
       .from("scheduled_messages")
       .insert({
         scheduled_time: scheduledDateTime.toISOString(),
@@ -104,9 +104,9 @@ export async function POST(request: Request) {
 // GET endpoint to fetch scheduled messages
 export async function GET() {
   try {
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { data, error } = await neonClient
+    const { data, error } = await supabaseClient
       .from("scheduled_messages")
       .select("*")
       .order("scheduled_time", { ascending: true })
@@ -138,9 +138,9 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Missing message ID" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
-    const { error } = await neonClient.from("scheduled_messages").delete().eq("id", id).eq("status", "pending")
+    const { error } = await supabaseClient.from("scheduled_messages").delete().eq("id", id).eq("status", "pending")
 
     if (error) {
       console.error("[v0] Error deleting scheduled message:", error)
@@ -168,10 +168,10 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Missing message ID" }, { status: 400 })
     }
 
-    const neonClient = await createClient()
+    const supabaseClient = await createClient()
 
     // Check if message exists and is still pending
-    const { data: existingMessage, error: fetchError } = await neonClient
+    const { data: existingMessage, error: fetchError } = await supabaseClient
       .from("scheduled_messages")
       .select("*")
       .eq("id", id)
@@ -232,7 +232,7 @@ export async function PATCH(request: Request) {
 
     // Handle template update
     if (templateId) {
-      const { data: settingsData } = await neonClient.from("api_settings").select("*").limit(1)
+      const { data: settingsData } = await supabaseClient.from("api_settings").select("*").limit(1)
       const settings = settingsData?.[0]
 
       if (!settings) {
@@ -275,7 +275,11 @@ export async function PATCH(request: Request) {
       updates.media_url = imageUrl || null
     }
 
-    const { error } = await neonClient.from("scheduled_messages").update(updates).eq("id", id).eq("status", "pending")
+    const { error } = await supabaseClient
+      .from("scheduled_messages")
+      .update(updates)
+      .eq("id", id)
+      .eq("status", "pending")
 
     if (error) {
       console.error("[v0] Error updating scheduled message:", error)
