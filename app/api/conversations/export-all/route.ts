@@ -3,42 +3,15 @@ import { createClient } from "@/lib/neon/server"
 
 export const dynamic = "force-dynamic"
 
-function normalizePhoneNumber(phone: string): string {
-  return phone.replace(/\D/g, "")
-}
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const limitParam = searchParams.get("limit")
-  const limit = limitParam ? Number.parseInt(limitParam) : null
-  const offset = Number.parseInt(searchParams.get("offset") || "0")
+  const format = searchParams.get("format") || "json"
   const filter = searchParams.get("filter") || "all"
 
-  console.log("[v0] API - Fetching conversations with limit:", limit || "ALL", "offset:", offset, "filter:", filter)
-
-  const neonClient = await createClient()
-  return await buildConversationsDynamically(neonClient, limit, offset, filter)
-}
-
-async function buildConversationsDynamically(neonClient: any, limit: number | null, offset: number, filter: string) {
   try {
-    const { rows: countRows } = await neonClient.query(`
-      WITH all_phones AS (
-        SELECT DISTINCT REGEXP_REPLACE(from_number, '[^0-9]', '', 'g') as normalized_phone
-        FROM webhook_messages
-        UNION
-        SELECT DISTINCT REGEXP_REPLACE(to_number, '[^0-9]', '', 'g') as normalized_phone
-        FROM message_history
-      )
-      SELECT COUNT(*) as total FROM all_phones
-    `)
+    const neonClient = await createClient()
 
-    const totalConversations = Number.parseInt(countRows[0]?.total || "0")
-    console.log("[v0] API - Total conversations in database:", totalConversations)
-
-    const limitClause = limit !== null ? `LIMIT $1 OFFSET $2` : `OFFSET $1`
-    const queryParams = limit !== null ? [limit, offset] : [offset]
-
+    // جلب جميع المحادثات
     const { rows: conversations } = await neonClient.query(
       `
       WITH all_messages AS (
@@ -108,41 +81,63 @@ async function buildConversationsDynamically(neonClient: any, limit: number | nu
       ${filter === "unread" ? "WHERE COALESCE(u.unread_count, 0) > 0" : ""}
       ${filter === "conversations" ? "WHERE COALESCE(h.has_incoming_messages, false) = true" : ""}
       ORDER BY l.message_time DESC
-      ${limitClause}
     `,
-      queryParams,
     )
 
-    console.log("[v0] API - Fetched", conversations?.length || 0, "conversations")
+    if (format === "csv") {
+      // تصدير CSV
+      const csvHeader = "رقم الهاتف,اسم جهة الاتصال,آخر رسالة,وقت آخر رسالة,عدد الرسائل غير المقروءة,نوع آخر رسالة\n"
+      const csvRows = conversations
+        .map((conv: any) => {
+          const phoneNumber = conv.phone_number
+          const contactName = conv.contact_name.replace(/,/g, " ")
+          const lastMessage = (conv.last_message_text || "").replace(/,/g, " ").replace(/\n/g, " ")
+          const lastMessageTime = new Date(conv.last_message_time).toLocaleString("ar-SA")
+          const unreadCount = conv.unread_count
+          const messageType = conv.last_message_is_outgoing ? "صادرة" : "واردة"
 
-    const formattedConversations = (conversations || []).map((conv: any) => ({
-      phone_number: conv.phone_number,
-      contact_name: conv.contact_name,
-      last_message_text: conv.last_message_text,
-      last_message_time: new Date(conv.last_message_time).toISOString(),
-      last_message_is_outgoing: conv.last_message_is_outgoing,
-      unread_count: conv.unread_count,
-      is_read: conv.is_read,
-      updated_at: new Date(conv.updated_at).toISOString(),
-      has_incoming_messages: conv.has_incoming_messages,
-    }))
+          return `${phoneNumber},${contactName},${lastMessage},${lastMessageTime},${unreadCount},${messageType}`
+        })
+        .join("\n")
 
-    const hasMore = limit !== null ? offset + conversations.length < totalConversations : false
+      const csv = csvHeader + csvRows
 
-    console.log("[v0] API - Returning hasMore:", hasMore, "total loaded:", conversations.length)
+      return new NextResponse(csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="conversations-${new Date().toISOString().split("T")[0]}.csv"`,
+        },
+      })
+    } else {
+      // تصدير JSON
+      const formattedConversations = conversations.map((conv: any) => ({
+        phone_number: conv.phone_number,
+        contact_name: conv.contact_name,
+        last_message_text: conv.last_message_text,
+        last_message_time: new Date(conv.last_message_time).toISOString(),
+        last_message_is_outgoing: conv.last_message_is_outgoing,
+        unread_count: conv.unread_count,
+        is_read: conv.is_read,
+        updated_at: new Date(conv.updated_at).toISOString(),
+        has_incoming_messages: conv.has_incoming_messages,
+      }))
 
-    return NextResponse.json(
-      {
-        conversations: formattedConversations,
-        hasMore,
-        nextOffset: limit !== null ? offset + limit : offset,
-        total: totalConversations,
-        loaded: conversations.length,
-      },
-      { status: 200 },
-    )
+      return NextResponse.json(
+        {
+          exported_at: new Date().toISOString(),
+          total_conversations: formattedConversations.length,
+          filter: filter,
+          conversations: formattedConversations,
+        },
+        {
+          headers: {
+            "Content-Disposition": `attachment; filename="conversations-${new Date().toISOString().split("T")[0]}.json"`,
+          },
+        },
+      )
+    }
   } catch (error) {
-    console.error("[v0] API - Error building conversations:", error)
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+    console.error("[v0] Error exporting conversations:", error)
+    return NextResponse.json({ error: "فشل في تصدير المحادثات" }, { status: 500 })
   }
 }

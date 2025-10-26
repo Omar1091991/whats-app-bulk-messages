@@ -1,5 +1,7 @@
 import { Pool } from "@neondatabase/serverless"
 
+let globalPool: Pool | null = null
+
 interface QueryBuilder {
   select: (columns?: string, options?: { count?: string; head?: boolean }) => QueryBuilder
   insert: (data: any) => QueryBuilder
@@ -96,7 +98,6 @@ class NeonQueryBuilder implements QueryBuilder {
     } else if (operator === "in") {
       this.whereConditions.push({ column, operator: "NOT IN", value })
     } else {
-      // For other operators, negate them
       this.whereConditions.push({ column, operator: `NOT ${operator}`, value })
     }
     return this
@@ -297,7 +298,11 @@ class NeonQueryBuilder implements QueryBuilder {
   }
 }
 
-export async function createClient() {
+function getPool(): Pool {
+  if (globalPool) {
+    return globalPool
+  }
+
   const connectionString =
     process.env.DATABASE_URL ||
     process.env.NEON_DATABASE_URL ||
@@ -311,8 +316,19 @@ export async function createClient() {
     throw new Error("No Neon database connection string found. Please set DATABASE_URL environment variable.")
   }
 
-  console.log("[v0] Neon connection string found, connecting to database...")
-  const pool = new Pool({ connectionString })
+  console.log("[v0] Creating new Neon connection pool...")
+  globalPool = new Pool({
+    connectionString,
+    max: 10, // الحد الأقصى للاتصالات في الـ pool
+    idleTimeoutMillis: 30000, // إغلاق الاتصالات الخاملة بعد 30 ثانية
+    connectionTimeoutMillis: 10000, // مهلة الاتصال 10 ثواني
+  })
+
+  return globalPool
+}
+
+export async function createClient() {
+  const pool = getPool()
 
   return {
     from: (tableName: string) => new NeonQueryBuilder(pool, tableName),

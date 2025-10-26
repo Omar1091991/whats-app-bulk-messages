@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
@@ -16,6 +16,11 @@ import {
   ArrowRight,
   ArrowDown,
   Download,
+  FileDown,
+  FileSpreadsheet,
+  FileText,
+  CheckSquare,
+  Square,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import useSWR from "swr"
@@ -77,13 +82,14 @@ export function WhatsAppInbox() {
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
   const [loadingMediaIds, setLoadingMediaIds] = useState<Set<string>>(new Set())
   const [mediaCache, setMediaCache] = useState<Map<string, string>>(new Map())
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [hasMore, setHasMore] = useState(true)
-  const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [offset, setOffset] = useState(0)
-  const CONVERSATIONS_PER_PAGE = 20
-  const [totalConversations, setTotalConversations] = useState(0)
-  const [loadedConversations, setLoadedConversations] = useState(0)
+  // Removed: const [conversations, setConversations] = useState<Conversation[]>([])
+  // Removed: const [hasMore, setHasMore] = useState(true)
+  // Removed: const [isLoadingMore, setIsLoadingMore] = useState(false)
+  // Removed: const [offset, setOffset] = useState(0)
+  // Removed: const CONVERSATIONS_PER_PAGE = 100
+  // Removed: const [totalConversations, setTotalConversations] = useState(0)
+  // Removed: const [loadedConversations, setLoadedConversations] = useState(0)
+  // Removed: const isInitialLoadingRef = useRef(false)
 
   const searchRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -94,25 +100,24 @@ export function WhatsAppInbox() {
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [showChat, setShowChat] = useState(false)
 
-  const { data: initialData, mutate: mutateConversations } = useSWR(
-    `/api/conversations?limit=${CONVERSATIONS_PER_PAGE}&offset=0&filter=${activeFilter}`,
+  const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set())
+  const [isExporting, setIsExporting] = useState(false)
+
+  const { data: conversationsData, mutate: mutateConversations } = useSWR(
+    `/api/conversations?filter=${activeFilter}`,
     fetcher,
     {
-      refreshInterval: 3000,
+      refreshInterval: 10000,
+      dedupingInterval: 5000,
       revalidateOnFocus: false,
-      onSuccess: (data) => {
-        if (offset === 0 && data.conversations) {
-          setConversations(data.conversations)
-          setHasMore(data.hasMore || false)
-          setTotalConversations(data.total || 0)
-          setLoadedConversations(data.conversations.length)
-          console.log("[v0] Initial load - conversations:", data.conversations.length, "of", data.total)
-        }
-      },
+      revalidateOnReconnect: false,
     },
   )
 
-  const conversationMessages: Message[] = initialData?.messages || []
+  const conversations = conversationsData?.conversations || []
+  const totalConversations = conversationsData?.total || 0
+
+  const conversationMessages: Message[] = conversationsData?.messages || []
 
   useEffect(() => {
     if (conversationMessages.length > 0 && isAtBottom) {
@@ -223,7 +228,6 @@ export function WhatsAppInbox() {
     const date = typeof timestamp === "number" ? new Date(timestamp * 1000) : new Date(timestamp)
     const now = new Date()
 
-    // Reset time to midnight for accurate day comparison
     const dateAtMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate())
     const nowAtMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 
@@ -231,16 +235,12 @@ export function WhatsAppInbox() {
     const days = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
 
     if (days === 0) {
-      // اليوم - عرض الوقت فقط
       return date.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })
     } else if (days === 1) {
-      // أمس
       return "أمس"
     } else if (days < 7) {
-      // خلال الأسبوع - عرض اسم اليوم
       return date.toLocaleDateString("ar-SA", { weekday: "long" })
     } else {
-      // أقدم من أسبوع - عرض التاريخ الكامل
       return date.toLocaleDateString("ar-SA", { day: "numeric", month: "numeric", year: "numeric" })
     }
   }
@@ -300,13 +300,13 @@ export function WhatsAppInbox() {
   }, [viewedConversations])
 
   useEffect(() => {
-    if (!initialData || initialData.conversations.length === 0) return
+    if (!conversationsData || conversationsData.conversations.length === 0) return
 
     const newUnreadCounts = new Map<string, number>()
     const updatedViewedConversations = new Set(viewedConversations)
     let hasChanges = false
 
-    initialData.conversations.forEach((conv) => {
+    conversationsData.conversations.forEach((conv) => {
       const currentUnreadCount = conv.unread_count
       const previousUnreadCount = previousUnreadCounts.get(conv.phone_number) || 0
 
@@ -322,7 +322,7 @@ export function WhatsAppInbox() {
       setViewedConversations(updatedViewedConversations)
       setPreviousUnreadCounts(newUnreadCounts)
     }
-  }, [initialData])
+  }, [conversationsData])
 
   const isMediaId = (url: string | null): boolean => {
     if (!url) return false
@@ -344,7 +344,6 @@ export function WhatsAppInbox() {
       const response = await fetch(`/api/fetch-whatsapp-media?mediaId=${encodeURIComponent(mediaId)}`)
 
       if (response.status === 410) {
-        // Media has expired, mark as failed silently
         setFailedImages((prev) => new Set(prev).add(mediaId))
         return null
       }
@@ -359,7 +358,6 @@ export function WhatsAppInbox() {
         return null
       }
     } catch (error) {
-      // Silently handle errors for expired media
       setFailedImages((prev) => new Set(prev).add(mediaId))
       return null
     } finally {
@@ -403,92 +401,111 @@ export function WhatsAppInbox() {
     }
   }
 
-  const loadMoreConversations = useCallback(async () => {
-    if (isLoadingMore || !hasMore) {
-      console.log("[v0] Skipping load more - isLoadingMore:", isLoadingMore, "hasMore:", hasMore)
+  const toggleSelectConversation = (phoneNumber: string) => {
+    setSelectedConversations((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(phoneNumber)) {
+        newSet.delete(phoneNumber)
+      } else {
+        newSet.add(phoneNumber)
+      }
+      return newSet
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedConversations.size === displayedConversations.length) {
+      setSelectedConversations(new Set())
+    } else {
+      setSelectedConversations(new Set(displayedConversations.map((c) => c.phone_number)))
+    }
+  }
+
+  const exportSelectedConversations = async (format: "excel" | "pdf") => {
+    if (selectedConversations.size === 0) {
+      toast({
+        title: "تنبيه",
+        description: "الرجاء تحديد محادثة واحدة على الأقل",
+        variant: "destructive",
+      })
       return
     }
 
-    setIsLoadingMore(true)
-    const nextOffset = offset + CONVERSATIONS_PER_PAGE
-
-    console.log("[v0] Loading more conversations - current offset:", offset, "next offset:", nextOffset)
-
+    setIsExporting(true)
     try {
-      const response = await fetch(
-        `/api/conversations?limit=${CONVERSATIONS_PER_PAGE}&offset=${nextOffset}&filter=${activeFilter}`,
-      )
-      const data = await response.json()
+      const phoneNumbers = Array.from(selectedConversations)
+      const url = `/api/conversations/export-${format}`
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNumbers }),
+      })
 
-      console.log("[v0] Loaded more conversations:", data.conversations?.length || 0, "hasMore:", data.hasMore)
+      if (!response.ok) throw new Error("فشل في تصدير المحادثات")
 
-      if (data.conversations && data.conversations.length > 0) {
-        setConversations((prev) => {
-          // تجنب التكرار
-          const existingPhones = new Set(prev.map((c) => c.phone_number))
-          const newConversations = data.conversations.filter((c: Conversation) => !existingPhones.has(c.phone_number))
-          return [...prev, ...newConversations]
-        })
-        setOffset(nextOffset)
-        setHasMore(data.hasMore || false)
-        setLoadedConversations((prev) => prev + data.conversations.length)
-      } else {
-        setHasMore(false)
-      }
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = downloadUrl
+      a.download = `conversations-${new Date().toISOString().split("T")[0]}.${format === "excel" ? "xlsx" : "pdf"}`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      document.body.removeChild(a)
+
+      toast({
+        title: "تم التصدير بنجاح",
+        description: `تم تصدير ${selectedConversations.size} محادثة بصيغة ${format === "excel" ? "Excel" : "PDF"}`,
+      })
+
+      setSelectedConversations(new Set())
     } catch (error) {
-      console.error("[v0] Error loading more conversations:", error)
       toast({
         title: "خطأ",
-        description: "فشل في تحميل المزيد من المحادثات",
+        description: "فشل في تصدير المحادثات",
         variant: "destructive",
       })
     } finally {
-      setIsLoadingMore(false)
+      setIsExporting(false)
     }
-  }, [offset, hasMore, isLoadingMore, activeFilter, toast])
+  }
 
-  useEffect(() => {
-    console.log("[v0] Filter changed to:", activeFilter, "- resetting conversations")
-    setOffset(0)
-    setConversations([])
-    setHasMore(true)
-    setLoadedConversations(0)
-    mutateConversations()
-  }, [activeFilter, mutateConversations])
+  const exportAllConversationsNew = async (format: "excel" | "pdf") => {
+    setIsExporting(true)
+    try {
+      const url = `/api/conversations/export-${format}?filter=${activeFilter}`
+      const response = await fetch(url)
 
-  useEffect(() => {
-    const conversationsList = conversationsListRef.current
-    if (!conversationsList) return
+      if (!response.ok) throw new Error("فشل في تصدير المحادثات")
 
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = conversationsList
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = downloadUrl
+      a.download = `all-conversations-${new Date().toISOString().split("T")[0]}.${format === "excel" ? "xlsx" : "pdf"}`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      document.body.removeChild(a)
 
-      // تحميل المزيد عندما يكون المستخدم على بعد 100px من الأسفل
-      if (distanceFromBottom < 100 && hasMore && !isLoadingMore) {
-        console.log("[v0] Near bottom - triggering load more")
-        loadMoreConversations()
-      }
+      toast({
+        title: "تم التصدير بنجاح",
+        description: `تم تصدير ${totalConversations} محادثة بصيغة ${format === "excel" ? "Excel" : "PDF"}`,
+      })
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "فشل في تصدير المحادثات",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExporting(false)
     }
+  }
 
-    conversationsList.addEventListener("scroll", handleScroll)
+  // Removed: loadMoreConversations, and related effects and states
 
-    // تحقق من الحاجة للتحميل عند التحميل الأولي
-    const checkInitialLoad = () => {
-      const { scrollHeight, clientHeight } = conversationsList
-      if (scrollHeight <= clientHeight && hasMore && !isLoadingMore) {
-        console.log("[v0] Content fits in viewport - loading more")
-        loadMoreConversations()
-      }
-    }
-
-    // تأخير بسيط للسماح بالتحميل الأولي
-    setTimeout(checkInitialLoad, 500)
-
-    return () => conversationsList.removeEventListener("scroll", handleScroll)
-  }, [hasMore, isLoadingMore, loadMoreConversations])
-
-  if (!initialData) {
+  if (!conversationsData) {
     return (
       <div className="flex items-center justify-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -498,18 +515,84 @@ export function WhatsAppInbox() {
 
   return (
     <div className="flex h-screen bg-[#111b21] overflow-hidden" dir="rtl">
+      {/* Conversations Sidebar */}
       <div
         className={`${showChat ? "hidden md:flex" : "flex"} w-full md:w-[380px] lg:w-[420px] bg-[#111b21] border-l border-[#2a3942] flex-col h-screen`}
       >
+        {/* Header */}
         <div className="bg-[#202c33] p-3 md:p-4 flex items-center justify-between flex-shrink-0">
           <h1 className="text-white text-lg md:text-xl font-semibold">المحادثات</h1>
           <div className="flex gap-2">
+            <div className="relative group">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10"
+                disabled={isExporting}
+              >
+                {isExporting ? (
+                  <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin" />
+                ) : (
+                  <FileDown className="h-4 w-4 md:h-5 md:w-5" />
+                )}
+              </Button>
+              <div className="absolute left-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 min-w-[200px]">
+                <div className="px-3 py-2 border-b border-[#2a3942]">
+                  <p className="text-xs text-[#8696a0] font-semibold">تصدير المحادثات</p>
+                </div>
+
+                {selectedConversations.size > 0 && (
+                  <>
+                    <div className="px-3 py-2 bg-[#1a2730] border-b border-[#2a3942]">
+                      <p className="text-[10px] text-[#00a884] font-medium">المحددة ({selectedConversations.size})</p>
+                    </div>
+                    <button
+                      onClick={() => exportSelectedConversations("excel")}
+                      disabled={isExporting}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+                    >
+                      <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                      <span>تصدير Excel</span>
+                    </button>
+                    <button
+                      onClick={() => exportSelectedConversations("pdf")}
+                      disabled={isExporting}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50 border-b border-[#2a3942]"
+                    >
+                      <FileText className="h-4 w-4 text-red-500" />
+                      <span>تصدير PDF</span>
+                    </button>
+                  </>
+                )}
+
+                <div className="px-3 py-2 bg-[#1a2730] border-b border-[#2a3942]">
+                  <p className="text-[10px] text-[#8696a0] font-medium">تصدير الكل ({totalConversations})</p>
+                </div>
+                <button
+                  onClick={() => exportAllConversationsNew("excel")}
+                  disabled={isExporting}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                  <span>تصدير Excel</span>
+                </button>
+                <button
+                  onClick={() => exportAllConversationsNew("pdf")}
+                  disabled={isExporting}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
+                >
+                  <FileText className="h-4 w-4 text-red-500" />
+                  <span>تصدير PDF</span>
+                </button>
+              </div>
+            </div>
             <Button variant="ghost" size="icon" className="text-white hover:bg-[#2a3942] h-9 w-9 md:h-10 md:w-10">
               <MoreVertical className="h-4 w-4 md:h-5 md:w-5" />
             </Button>
           </div>
         </div>
 
+        {/* Search */}
         <div className="p-2 bg-[#111b21] relative flex-shrink-0" ref={searchRef}>
           <div className="bg-[#202c33] rounded-lg flex items-center px-3 md:px-4 py-2">
             <Search className="h-4 w-4 md:h-5 md:w-5 text-white ml-2 md:ml-3" />
@@ -554,6 +637,33 @@ export function WhatsAppInbox() {
           )}
         </div>
 
+        {displayedConversations.length > 0 && (
+          <div className="px-2 pt-2 bg-[#111b21] flex-shrink-0">
+            <div className="flex items-center justify-between bg-[#202c33] rounded-lg p-2">
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-2 text-white hover:text-[#00a884] transition-colors"
+              >
+                {selectedConversations.size === displayedConversations.length ? (
+                  <CheckSquare className="h-5 w-5 text-[#00a884]" />
+                ) : (
+                  <Square className="h-5 w-5" />
+                )}
+                <span className="text-sm font-medium">
+                  {selectedConversations.size === displayedConversations.length ? "إلغاء التحديد" : "تحديد الكل"}
+                </span>
+              </button>
+              {selectedConversations.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#8696a0]">محدد:</span>
+                  <span className="text-sm font-bold text-[#00a884]">{selectedConversations.size}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Filters */}
         <div className="px-2 pb-2 bg-[#111b21] flex-shrink-0">
           <div className="flex gap-2 bg-[#202c33] rounded-lg p-1">
             <button
@@ -589,6 +699,7 @@ export function WhatsAppInbox() {
           </div>
         </div>
 
+        {/* Conversations List */}
         <div ref={conversationsListRef} className="flex-1 overflow-y-auto">
           {displayedConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-[#667781]">
@@ -604,12 +715,11 @@ export function WhatsAppInbox() {
           ) : (
             <div>
               {totalConversations > 0 && (
-                <div className="px-3 py-2 text-center text-xs bg-[#202c33] text-[#8696a0] sticky top-0 z-10 border-b border-[#2a3942]">
-                  <div className="flex items-center justify-center gap-2">
-                    <span>
-                      تم تحميل {loadedConversations} من {totalConversations} محادثة
-                    </span>
-                    {hasMore && <span className="text-[#00a884]">• جاري التحميل التلقائي</span>}
+                <div className="px-3 py-2.5 text-center bg-[#202c33] border-b border-[#2a3942] sticky top-0 z-10">
+                  <div className="flex items-center justify-center gap-2 text-xs">
+                    <CheckCheck className="h-4 w-4 text-[#00a884]" />
+                    <span className="text-white font-medium">{totalConversations}</span>
+                    <span className="text-[#8696a0]">محادثة محملة</span>
                   </div>
                 </div>
               )}
@@ -617,66 +727,69 @@ export function WhatsAppInbox() {
               {displayedConversations.map((conversation) => (
                 <div
                   key={conversation.phone_number}
-                  onClick={() => handleSelectConversation(conversation)}
                   className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 cursor-pointer hover:bg-[#202c33] transition-colors ${
                     selectedConversation?.phone_number === conversation.phone_number ? "bg-[#2a3942]" : ""
                   }`}
                 >
-                  <Avatar className="h-10 w-10 md:h-12 md:w-12 flex-shrink-0">
-                    <AvatarFallback className="bg-[#00a884] text-white text-xs md:text-sm">
-                      {getInitials(conversation.contact_name)}
-                    </AvatarFallback>
-                  </Avatar>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSelectConversation(conversation.phone_number)
+                    }}
+                    className="flex-shrink-0 text-white hover:text-[#00a884] transition-colors"
+                  >
+                    {selectedConversations.has(conversation.phone_number) ? (
+                      <CheckSquare className="h-5 w-5 text-[#00a884]" />
+                    ) : (
+                      <Square className="h-5 w-5" />
+                    )}
+                  </button>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="text-white font-medium text-sm md:text-base truncate">
-                        {conversation.contact_name}
-                      </h3>
-                      <span className="text-[10px] md:text-xs text-[#667781] ml-2 flex-shrink-0">
-                        {formatTimestamp(conversation.last_message_time)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs md:text-sm text-[#667781] truncate flex-1 flex items-center gap-1">
-                        {conversation.last_message_is_outgoing && (
-                          <CheckCheck className="h-3 w-3 text-[#53bdeb] flex-shrink-0" />
+                  <div
+                    onClick={() => handleSelectConversation(conversation)}
+                    className="flex items-center gap-2 md:gap-3 flex-1 min-w-0"
+                  >
+                    <Avatar className="h-10 w-10 md:h-12 md:w-12 flex-shrink-0">
+                      <AvatarFallback className="bg-[#00a884] text-white text-xs md:text-sm">
+                        {getInitials(conversation.contact_name)}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-white font-medium text-sm md:text-base truncate">
+                          {conversation.contact_name}
+                        </h3>
+                        <span className="text-[10px] md:text-xs text-[#667781] ml-2 flex-shrink-0">
+                          {formatTimestamp(conversation.last_message_time)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs md:text-sm text-[#667781] truncate flex-1 flex items-center gap-1">
+                          {conversation.last_message_is_outgoing && (
+                            <CheckCheck className="h-3 w-3 text-[#53bdeb] flex-shrink-0" />
+                          )}
+                          <span className="truncate">{conversation.last_message_text || "رسالة"}</span>
+                        </p>
+                        {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
+                          <div className="bg-[#25d366] text-white h-5 w-5 rounded-full flex items-center justify-center text-[10px] md:text-[11px] font-bold ml-2 flex-shrink-0">
+                            {conversation.unread_count}
+                          </div>
                         )}
-                        <span className="truncate">{conversation.last_message_text || "رسالة"}</span>
-                      </p>
-                      {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
-                        <div className="bg-[#25d366] text-white h-5 w-5 rounded-full flex items-center justify-center text-[10px] md:text-[11px] font-bold ml-2 flex-shrink-0">
-                          {conversation.unread_count}
-                        </div>
-                      )}
+                      </div>
                     </div>
                   </div>
                 </div>
               ))}
-
-              {isLoadingMore && (
-                <div className="flex items-center justify-center p-4 bg-[#111b21]">
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-6 w-6 animate-spin text-[#00a884]" />
-                    <span className="text-[#667781] text-sm">جاري تحميل المزيد من المحادثات...</span>
-                  </div>
-                </div>
-              )}
-
-              {!hasMore && conversations.length > 0 && (
-                <div className="flex flex-col items-center justify-center p-6 text-[#667781] bg-[#111b21]">
-                  <CheckCheck className="h-8 w-8 mb-2 text-[#00a884]" />
-                  <p className="text-sm font-medium">تم تحميل جميع المحادثات</p>
-                  <p className="text-xs mt-1">({totalConversations} محادثة)</p>
-                </div>
-              )}
             </div>
           )}
         </div>
       </div>
 
+      {/* Chat Area */}
       {selectedConversation ? (
         <div className={`${showChat ? "flex" : "hidden md:flex"} flex-1 flex-col h-screen`}>
+          {/* Chat Header */}
           <div className="bg-[#202c33] p-2 md:p-3 flex items-center justify-between border-b border-[#2a3942] flex-shrink-0">
             <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
               <Button
@@ -730,12 +843,13 @@ export function WhatsAppInbox() {
             </div>
           </div>
 
+          {/* Messages */}
           <div
             ref={messagesContainerRef}
             className="flex-1 overflow-y-auto p-3 md:p-4 scroll-smooth relative"
             style={{ backgroundColor: "#0b141a" }}
           >
-            {!initialData ? (
+            {!conversationsData ? (
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-8 w-8 animate-spin text-[#667781]" />
               </div>
@@ -859,6 +973,8 @@ export function WhatsAppInbox() {
               </Button>
             )}
           </div>
+
+          {/* Reply Input */}
           <div className="bg-[#202c33] p-2 md:p-3 border-t border-[#2a3942] flex-shrink-0">
             <div className="flex items-end gap-2">
               <Textarea
