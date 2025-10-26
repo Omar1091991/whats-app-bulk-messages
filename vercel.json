@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/calculate-daily-stats",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-expired-media",
+      "schedule": "0 2 * * *"
     }
   ]
 }

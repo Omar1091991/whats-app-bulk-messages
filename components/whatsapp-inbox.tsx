@@ -36,6 +36,7 @@ interface Conversation {
   last_message_is_outgoing?: boolean
   has_incoming_messages?: boolean
   has_replies?: boolean
+  is_read?: boolean // Added for filtering
 }
 
 interface Message {
@@ -84,6 +85,12 @@ export function WhatsAppInbox() {
   const [loadingMediaIds, setLoadingMediaIds] = useState<Set<string>>(new Set())
   const [mediaCache, setMediaCache] = useState<Map<string, string>>(new Map())
 
+  // const [page, setPage] = useState(1)
+  // const [allLoadedConversations, setAllLoadedConversations] = useState<Conversation[]>([])
+  const [isLoadingMore, setIsLoadingMore] = useState(false) // Declared isLoadingMore
+  // const [hasMoreConversations, setHasMoreConversations] = useState(true)
+  // const CONVERSATIONS_PER_PAGE = 50
+
   const searchRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -97,26 +104,57 @@ export function WhatsAppInbox() {
   const [isExporting, setIsExporting] = useState(false)
   const [isExportMode, setIsExportMode] = useState(false)
 
-  const { data: conversationsData, mutate: mutateConversations } = useSWR(
-    `/api/conversations?filter=${activeFilter}`,
-    fetcher,
-    {
-      refreshInterval: 5000, // تحديث كل 5 ثوانٍ
-      dedupingInterval: 2000,
-      revalidateOnFocus: true, // تحديث عند العودة للتطبيق
-      revalidateOnReconnect: true, // تحديث عند إعادة الاتصال
-    },
-  )
+  const { data: conversationsData, mutate: mutateConversations } = useSWR(`/api/conversations`, fetcher, {
+    refreshInterval: 30000, // 30 ثانية
+    dedupingInterval: 15000, // 15 ثانية
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+  })
 
   const conversations = conversationsData?.conversations || []
-  const totalConversations = conversationsData?.total || 0
+  // const totalConversations = conversationsData?.total || 0 // لم نعد نستخدم totalConversations
+
+  // useEffect(() => {
+  //   if (conversationsData?.conversations) {
+  //     if (page === 1) {
+  //       setAllLoadedConversations(conversationsData.conversations)
+  //     } else {
+  //       setAllLoadedConversations((prev) => {
+  //         const existingIds = new Set(prev.map((c) => c.phone_number))
+  //         const newConversations = conversationsData.conversations.filter(
+  //           (c: Conversation) => !existingIds.has(c.phone_number),
+  //         )
+  //         return [...prev, ...newConversations]
+  //       })
+  //     }
+  //     setHasMoreConversations(conversationsData.hasMore || false)
+  //     setIsLoadingMore(false)
+  //   }
+  // }, [conversationsData, page])
+
+  // useEffect(() => {
+  //   setPage(1)
+  //   setAllLoadedConversations([])
+  //   setHasMoreConversations(true)
+  // }, [activeFilter])
+
+  // useEffect(() => {
+  //   if (!isLoadingMore && hasMoreConversations && allLoadedConversations.length > 0) {
+  //     const timer = setTimeout(() => {
+  //       setIsLoadingMore(true)
+  //       setPage((prev) => prev + 1)
+  //     }, 1000) // تحميل كل ثانية
+
+  //     return () => clearTimeout(timer)
+  //   }
+  // }, [isLoadingMore, hasMoreConversations, allLoadedConversations.length])
 
   const { data: messagesData, mutate: mutateMessages } = useSWR(
     selectedConversation ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}` : null,
     fetcher,
     {
-      refreshInterval: 3000, // تحديث كل 3 ثوانٍ
-      dedupingInterval: 1000,
+      refreshInterval: 15000, // 15 ثانية
+      dedupingInterval: 5000, // 5 ثوانٍ
       revalidateOnFocus: true,
     },
   )
@@ -267,12 +305,12 @@ export function WhatsAppInbox() {
     )
     .filter((conv) => {
       if (activeFilter === "unread") {
-        return conv.unread_count > 0
+        return !conv.is_read && conv.unread_count > 0
       }
       if (activeFilter === "conversations") {
         return conv.has_incoming_messages === true
       }
-      return true
+      return true // "الكل"
     })
 
   const searchSuggestions = searchQuery.trim() ? filteredConversations.slice(0, 5) : []
@@ -286,13 +324,7 @@ export function WhatsAppInbox() {
     setShowChat(true)
     setFailedImages(new Set())
 
-    if (conversation.unread_count > 0) {
-      fetch(`/api/conversations/${encodeURIComponent(conversation.phone_number)}`, {
-        method: "PATCH",
-      }).then(() => {
-        mutateConversations()
-      })
-    }
+    // لم يعد يتم إرسال PATCH request هنا
 
     if (typeof window !== "undefined") {
       const updatedViewedConversations = new Set(viewedConversations)
@@ -347,7 +379,7 @@ export function WhatsAppInbox() {
       return mediaCache.get(mediaId) || null
     }
 
-    if (loadingMediaIds.has(mediaId)) {
+    if (loadingMediaIds.has(mediaId) || failedImages.has(mediaId)) {
       return null
     }
 
@@ -357,6 +389,16 @@ export function WhatsAppInbox() {
       const response = await fetch(`/api/fetch-whatsapp-media?mediaId=${encodeURIComponent(mediaId)}`)
 
       if (response.status === 410) {
+        const data = await response.json()
+        if (data.expired) {
+          console.log(`[v0] Media expired: ${mediaId}`)
+        }
+        setFailedImages((prev) => new Set(prev).add(mediaId))
+        return null
+      }
+
+      if (!response.ok) {
+        console.warn(`[v0] Failed to fetch media ${mediaId}: ${response.status}`)
         setFailedImages((prev) => new Set(prev).add(mediaId))
         return null
       }
@@ -371,6 +413,10 @@ export function WhatsAppInbox() {
         return null
       }
     } catch (error) {
+      console.warn(
+        `[v0] Network error fetching media ${mediaId}:`,
+        error instanceof Error ? error.message : "Unknown error",
+      )
       setFailedImages((prev) => new Set(prev).add(mediaId))
       return null
     } finally {
@@ -427,6 +473,8 @@ export function WhatsAppInbox() {
   }
 
   const toggleSelectAll = () => {
+    if (!displayedConversations || displayedConversations.length === 0) return
+
     if (selectedConversations.size === displayedConversations.length) {
       setSelectedConversations(new Set())
     } else {
@@ -512,7 +560,7 @@ export function WhatsAppInbox() {
 
       toast({
         title: "تم التصدير بنجاح",
-        description: `تم تصدير ${totalConversations} محادثة بصيغة Excel`,
+        description: `تم تصدير ${conversations.length} محادثة بصيغة Excel`,
       })
     } catch (error) {
       toast({
@@ -545,7 +593,7 @@ export function WhatsAppInbox() {
 
       toast({
         title: "تم التصدير بنجاح",
-        description: `تم تصدير ${totalConversations} محادثة بصيغة PDF`,
+        description: `تم تصدير ${conversations.length} محادثة بصيغة PDF`,
       })
     } catch (error) {
       toast({
@@ -609,8 +657,11 @@ export function WhatsAppInbox() {
 
   if (!conversationsData) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="flex items-center justify-center h-screen bg-[#111b21]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#00a884] mx-auto mb-4" />
+          <p className="text-[#8696a0] text-sm">جاري تحميل المحادثات...</p>
+        </div>
       </div>
     )
   }
@@ -677,8 +728,14 @@ export function WhatsAppInbox() {
         </div>
 
         <div className="px-2 pb-2 bg-[#111b21] flex-shrink-0">
-          <div className="relative group">
+          <div className="relative">
             <button
+              onClick={() => {
+                const dropdown = document.getElementById("export-dropdown")
+                if (dropdown) {
+                  dropdown.classList.toggle("hidden")
+                }
+              }}
               className="w-full flex items-center justify-center gap-2 bg-[#202c33] hover:bg-[#2a3942] text-white rounded-lg py-2.5 px-3 transition-all text-sm font-medium"
               disabled={isExporting}
             >
@@ -691,13 +748,19 @@ export function WhatsAppInbox() {
                 </>
               )}
             </button>
-            <div className="absolute left-0 right-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+            <div
+              id="export-dropdown"
+              className="hidden absolute left-0 right-0 top-full mt-1 bg-[#202c33] rounded-lg shadow-lg overflow-hidden z-50"
+            >
               <div className="px-3 py-2 border-b border-[#2a3942]">
                 <p className="text-xs text-[#8696a0] font-semibold">خيارات التصدير</p>
               </div>
 
               <button
-                onClick={enterExportMode}
+                onClick={() => {
+                  enterExportMode()
+                  document.getElementById("export-dropdown")?.classList.add("hidden")
+                }}
                 disabled={isExporting}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50 border-b border-[#2a3942]"
               >
@@ -706,10 +769,13 @@ export function WhatsAppInbox() {
               </button>
 
               <div className="px-3 py-2 bg-[#1a2730] border-b border-[#2a3942]">
-                <p className="text-[10px] text-[#8696a0] font-medium">تصدير الكل ({totalConversations})</p>
+                <p className="text-[10px] text-[#8696a0] font-medium">تصدير الكل ({conversations.length})</p>
               </div>
               <button
-                onClick={exportAllConversations}
+                onClick={() => {
+                  exportAllConversations()
+                  document.getElementById("export-dropdown")?.classList.add("hidden")
+                }}
                 disabled={isExporting}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
               >
@@ -717,7 +783,10 @@ export function WhatsAppInbox() {
                 <span>تصدير Excel</span>
               </button>
               <button
-                onClick={exportAllConversationsPDF}
+                onClick={() => {
+                  exportAllConversationsPDF()
+                  document.getElementById("export-dropdown")?.classList.add("hidden")
+                }}
                 disabled={isExporting}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50"
               >
@@ -838,7 +907,7 @@ export function WhatsAppInbox() {
 
         {/* Conversations List */}
         <div ref={conversationsListRef} className="flex-1 overflow-y-auto">
-          {displayedConversations.length === 0 ? (
+          {displayedConversations.length === 0 && !isLoadingMore ? ( // Corrected condition
             <div className="flex flex-col items-center justify-center p-8 text-[#667781]">
               <MessageSquare className="h-12 w-12 md:h-24 md:w-24 mx-auto mb-4 opacity-20" />
               <p className="text-sm md:text-base">
@@ -851,12 +920,18 @@ export function WhatsAppInbox() {
             </div>
           ) : (
             <div>
-              {totalConversations > 0 && (
+              {conversations.length > 0 && (
                 <div className="px-3 py-2.5 text-center bg-[#202c33] border-b border-[#2a3942] sticky top-0 z-10">
                   <div className="flex items-center justify-center gap-2 text-xs">
                     <CheckCheck className="h-4 w-4 text-[#00a884]" />
-                    <span className="text-white font-medium">{totalConversations}</span>
-                    <span className="text-[#8696a0]">محادثة محملة</span>
+                    <span className="text-white font-medium">{displayedConversations.length}</span>
+                    <span className="text-[#8696a0]">محادثة</span>
+                    {activeFilter !== "all" && (
+                      <>
+                        <span className="text-[#8696a0]">من</span>
+                        <span className="text-white font-medium">{conversations.length}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -894,7 +969,7 @@ export function WhatsAppInbox() {
                           {getInitials(conversation.contact_name)}
                         </AvatarFallback>
                       </Avatar>
-                      {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
+                      {conversation.unread_count > 0 && (
                         <div className="absolute -top-1 -right-1 bg-[#25d366] text-white h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold border-2 border-[#111b21] shadow-lg animate-pulse">
                           <Bell className="h-3 w-3" />
                         </div>
@@ -906,14 +981,12 @@ export function WhatsAppInbox() {
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <h3
                             className={`font-medium text-sm md:text-base truncate ${
-                              conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number)
-                                ? "text-white font-bold"
-                                : "text-white"
+                              conversation.unread_count > 0 ? "text-white font-bold" : "text-white"
                             }`}
                           >
                             {conversation.contact_name}
                           </h3>
-                          {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
+                          {conversation.unread_count > 0 && (
                             <span className="bg-[#25d366] text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">
                               جديد
                             </span>
@@ -926,9 +999,7 @@ export function WhatsAppInbox() {
                       <div className="flex items-center justify-between">
                         <p
                           className={`text-xs md:text-sm truncate flex-1 flex items-center gap-1 ${
-                            conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number)
-                              ? "text-white font-medium"
-                              : "text-[#667781]"
+                            conversation.unread_count > 0 ? "text-white font-medium" : "text-[#667781]"
                           }`}
                         >
                           {conversation.last_message_is_outgoing && (
@@ -936,7 +1007,7 @@ export function WhatsAppInbox() {
                           )}
                           <span className="truncate">{conversation.last_message_text || "رسالة"}</span>
                         </p>
-                        {conversation.unread_count > 0 && !viewedConversations.has(conversation.phone_number) && (
+                        {conversation.unread_count > 0 && (
                           <div className="bg-[#25d366] text-white h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold ml-2 flex-shrink-0 shadow-md">
                             {conversation.unread_count}
                           </div>
