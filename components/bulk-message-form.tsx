@@ -77,6 +77,7 @@ export function BulkMessageForm() {
   const [totalToSend, setTotalToSend] = useState(0)
   const [showSuccessNotification, setShowSuccessNotification] = useState(false)
   const [successMessageCount, setSuccessMessageCount] = useState(0)
+  const [failedMessageCount, setFailedMessageCount] = useState(0)
 
   const [showInvalidNumbers, setShowInvalidNumbers] = useState(false)
   const [showDuplicates, setShowDuplicates] = useState(false)
@@ -318,6 +319,31 @@ export function BulkMessageForm() {
     setSentCount(0)
     setSendingProgress(0)
     setShowSuccessNotification(false)
+    setFailedMessageCount(0)
+
+    let progressInterval: NodeJS.Timeout | null = null
+    if (sendMode === "now") {
+      const totalMessages = phoneNumbers.length
+      const estimatedTimePerMessage = 0.5 // ثانية لكل رسالة (تقدير)
+      const totalEstimatedTime = totalMessages * estimatedTimePerMessage * 1000 // بالميلي ثانية
+      const updateInterval = 100 // تحديث كل 100ms
+      const progressIncrement = 100 / (totalEstimatedTime / updateInterval)
+
+      progressInterval = setInterval(() => {
+        setSendingProgress((prev) => {
+          const newProgress = prev + progressIncrement
+          if (newProgress >= 95) {
+            if (progressInterval) clearInterval(progressInterval)
+            return 95 // نتوقف عند 95% حتى نحصل على النتيجة الفعلية
+          }
+          return newProgress
+        })
+        setSentCount((prev) => {
+          const newCount = Math.floor((sendingProgress / 100) * totalMessages)
+          return Math.min(newCount, totalMessages - 1)
+        })
+      }, updateInterval)
+    }
 
     try {
       const apiUrl = sendMode === "now" ? "/api/send-bulk-messages" : "/api/scheduled-messages"
@@ -348,25 +374,13 @@ export function BulkMessageForm() {
       }
 
       if (sendMode === "now") {
-        const totalTime = phoneNumbers.length * 100
-        const startTime = Date.now()
-
-        const progressInterval = setInterval(() => {
-          const elapsed = Date.now() - startTime
-          const progress = Math.min((elapsed / totalTime) * 100, 99)
-          const estimatedSent = Math.floor((progress / 100) * phoneNumbers.length)
-
-          setSendingProgress(progress)
-          setSentCount(estimatedSent)
-        }, 50)
-
         const response = await fetch(apiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         })
 
-        clearInterval(progressInterval)
+        if (progressInterval) clearInterval(progressInterval)
 
         if (response.status === 401) {
           const data = await response.json()
@@ -388,7 +402,8 @@ export function BulkMessageForm() {
 
         const data = await response.json()
 
-        setSuccessMessageCount(data.successCount || phoneNumbers.length)
+        setSuccessMessageCount(data.successCount || 0)
+        setFailedMessageCount(data.failureCount || 0)
         setSendingProgress(100)
         setSentCount(phoneNumbers.length)
 
@@ -443,6 +458,8 @@ export function BulkMessageForm() {
         setSelectedImagePreview(null)
       }
     } catch (error) {
+      if (progressInterval) clearInterval(progressInterval)
+
       toast({
         title: "خطأ",
         description: error instanceof Error ? error.message : "فشل في إرسال الرسائل",
@@ -465,6 +482,7 @@ export function BulkMessageForm() {
     setSentCount(0)
     setTotalToSend(0)
     setSuccessMessageCount(0)
+    setFailedMessageCount(0)
     setShowInvalidNumbers(false)
     setShowDuplicates(false)
     setPhoneInput("")
@@ -1036,8 +1054,8 @@ export function BulkMessageForm() {
                   <CheckCircle2 className="h-8 w-8 text-green-600" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold text-green-900">تم الإرسال بنجاح!</h3>
-                  <p className="text-sm text-green-700">تم إرسال جميع الرسائل</p>
+                  <h3 className="text-xl font-bold text-green-900">اكتمل الإرسال!</h3>
+                  <p className="text-sm text-green-700">تم معالجة جميع الرسائل</p>
                 </div>
               </div>
               <Button variant="ghost" size="icon" onClick={closeSuccessNotification} className="hover:bg-gray-100">
@@ -1045,10 +1063,34 @@ export function BulkMessageForm() {
               </Button>
             </div>
 
-            <div className="bg-green-50 rounded-lg p-4 border-2 border-green-200">
-              <div className="flex items-center justify-between">
-                <span className="text-green-900 font-semibold">عدد الرسائل المرسلة:</span>
-                <span className="text-3xl font-bold text-green-600">{successMessageCount}</span>
+            <div className="space-y-3">
+              <div className="bg-green-50 rounded-lg p-4 border-2 border-green-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-green-900 font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5" />
+                    رسائل ناجحة:
+                  </span>
+                  <span className="text-3xl font-bold text-green-600">{successMessageCount}</span>
+                </div>
+              </div>
+
+              {failedMessageCount > 0 && (
+                <div className="bg-red-50 rounded-lg p-4 border-2 border-red-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-red-900 font-semibold flex items-center gap-2">
+                      <XCircle className="h-5 w-5" />
+                      رسائل فاشلة:
+                    </span>
+                    <span className="text-3xl font-bold text-red-600">{failedMessageCount}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-blue-900 font-medium">إجمالي الرسائل:</span>
+                  <span className="text-xl font-bold text-blue-600">{successMessageCount + failedMessageCount}</span>
+                </div>
               </div>
             </div>
 
