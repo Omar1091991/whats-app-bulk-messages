@@ -8,7 +8,7 @@ let conversationsCache: {
   timestamp: number
 } | null = null
 
-const CACHE_DURATION = 60000 // 1 دقيقة
+const CACHE_DURATION = 60000 // تقليل cache من 5 دقائق إلى 1 دقيقة لضمان تحديث البيانات بشكل أسرع
 
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
@@ -34,6 +34,7 @@ async function fetchAllRecords(
   selectFields: string,
   orderBy: string,
   maxRecords = 50000,
+  retryCount = 0,
 ) {
   const allRecords: any[] = []
   let from = 0
@@ -43,30 +44,56 @@ async function fetchAllRecords(
   try {
     while (hasMore && allRecords.length < maxRecords) {
       if (from > 0) {
-        await delay(300)
+        await delay(500) // زيادة التأخير من 300ms إلى 500ms
       }
 
-      const { data, error } = await supabaseClient
-        .from(tableName)
-        .select(selectFields)
-        .order(orderBy, { ascending: false })
-        .range(from, from + batchSize - 1)
+      try {
+        const { data, error } = await supabaseClient
+          .from(tableName)
+          .select(selectFields)
+          .order(orderBy, { ascending: false })
+          .range(from, from + batchSize - 1)
 
-      if (error) {
-        console.error(`[v0] Error fetching from ${tableName}:`, error)
-        break
-      }
-
-      if (data && data.length > 0) {
-        allRecords.push(...data)
-
-        if (data.length < batchSize || allRecords.length >= maxRecords) {
-          hasMore = false
-        } else {
-          from += batchSize
+        if (error) {
+          if (error.message?.includes("Too Many") || error.code === "429") {
+            if (retryCount < 3) {
+              const backoffDelay = Math.pow(2, retryCount) * 2000 // 2s, 4s, 8s
+              console.log(`[v0] Rate limit hit for ${tableName}, retrying in ${backoffDelay}ms...`)
+              await delay(backoffDelay)
+              return fetchAllRecords(supabaseClient, tableName, selectFields, orderBy, maxRecords, retryCount + 1)
+            } else {
+              console.error(`[v0] Max retries reached for ${tableName}`)
+              break
+            }
+          }
+          console.error(`[v0] Error fetching from ${tableName}:`, error)
+          break
         }
-      } else {
-        hasMore = false
+
+        if (data && data.length > 0) {
+          allRecords.push(...data)
+
+          if (data.length < batchSize || allRecords.length >= maxRecords) {
+            hasMore = false
+          } else {
+            from += batchSize
+          }
+        } else {
+          hasMore = false
+        }
+      } catch (fetchError: any) {
+        if (fetchError.message?.includes("Too Many") || fetchError.message?.includes("not valid JSON")) {
+          if (retryCount < 3) {
+            const backoffDelay = Math.pow(2, retryCount) * 2000
+            console.log(`[v0] Rate limit or JSON error for ${tableName}, retrying in ${backoffDelay}ms...`)
+            await delay(backoffDelay)
+            return fetchAllRecords(supabaseClient, tableName, selectFields, orderBy, maxRecords, retryCount + 1)
+          } else {
+            console.error(`[v0] Max retries reached for ${tableName}`)
+            break
+          }
+        }
+        throw fetchError
       }
     }
   } catch (error) {
@@ -123,21 +150,32 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
               phone_number: msg.from_number,
               contact_name: msg.from_name || msg.from_number,
               last_message_text: messageText,
-              last_incoming_message_text: messageText, // حفظ آخر رسالة واردة
-              last_incoming_message_time: msg.timestamp, // حفظ وقت آخر رسالة واردة
+              last_incoming_message_text: messageText,
+              last_incoming_message_time: msg.timestamp,
               last_message_time: msg.timestamp,
               last_message_is_outgoing: false,
-              unread_count: isRead ? 0 : 1,
+              unread_count: isRead ? 0 : 1, // تُعتبر غير مقروءة إذا لم يكن status = "read"
               is_read: isRead,
               has_replied: hasReplied,
               updated_at: msg.timestamp,
               has_incoming_messages: true,
             })
-          } else if (existing && new Date(msg.timestamp) > new Date(existing.last_incoming_message_time || 0)) {
-            // تحديث آخر رسالة واردة فقط إذا كانت أحدث
-            const messageText = msg.message_text?.trim() || "رسالة واردة"
-            existing.last_incoming_message_text = messageText
-            existing.last_incoming_message_time = msg.timestamp
+          } else if (existing) {
+            // تحديث آخر رسالة واردة إذا كانت أحدث
+            if (new Date(msg.timestamp) > new Date(existing.last_incoming_message_time || 0)) {
+              const messageText = msg.message_text?.trim() || "رسالة واردة"
+              existing.last_incoming_message_text = messageText
+              existing.last_incoming_message_time = msg.timestamp
+            }
+
+            if (msg.replied === true) {
+              existing.has_replied = true
+            }
+
+            // تُعتبر غير مقروءة إذا status !== "read" فقط
+            if (msg.status !== "read") {
+              existing.unread_count = (existing.unread_count || 0) + 1
+            }
           }
         }
 
@@ -152,7 +190,7 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
               phone_number: msg.to_number,
               contact_name: msg.to_number,
               last_message_text: messageText,
-              last_incoming_message_text: null, // لا توجد رسالة واردة
+              last_incoming_message_text: null,
               last_incoming_message_time: null,
               last_message_time: msg.created_at,
               last_message_is_outgoing: true,
@@ -163,17 +201,14 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
               has_incoming_messages: false,
             })
           } else if (new Date(msg.created_at) > new Date(existing.last_message_time)) {
-            // تحديث آخر رسالة بشكل عام للترتيب، لكن الاحتفاظ بآخر رسالة واردة
             existing.last_message_text = messageText
             existing.last_message_time = msg.created_at
             existing.last_message_is_outgoing = true
             existing.updated_at = msg.created_at
-            // لا نستبدل last_incoming_message_text هنا
           }
         }
 
         allConversations = Array.from(conversationsMap.values()).sort((a, b) => {
-          // استخدام آخر رسالة واردة للترتيب، مع fallback إلى آخر رسالة بشكل عام
           const aTime = a.last_incoming_message_time || a.last_message_time
           const bTime = b.last_incoming_message_time || b.last_message_time
           return new Date(bTime).getTime() - new Date(aTime).getTime()

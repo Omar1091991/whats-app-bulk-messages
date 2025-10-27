@@ -32,13 +32,15 @@ interface Conversation {
   contact_name: string
   unread_count: number
   last_message_text: string
-  last_incoming_message_text?: string | null // إضافة حقل آخر رسالة واردة
   last_message_time: string
   last_activity: string
   last_message_is_outgoing?: boolean
   has_incoming_messages?: boolean
   has_replies?: boolean
   is_read?: boolean // Added for filtering
+  last_incoming_message_text?: string | null // إضافة حقل آخر رسالة واردة
+  has_replied?: boolean // إضافة حقل has_replied
+  to_number?: string // إضافة حقل to_number
 }
 
 interface Message {
@@ -63,6 +65,7 @@ interface Message {
 }
 
 const MESSAGES_PER_PAGE = 10
+const CONVERSATIONS_PER_PAGE = 100
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
@@ -87,11 +90,17 @@ export function WhatsAppInbox() {
   const [loadingMediaIds, setLoadingMediaIds] = useState<Set<string>>(new Set())
   const [mediaCache, setMediaCache] = useState<Map<string, string>>(new Map())
 
-  // const [page, setPage] = useState(1)
-  // const [allLoadedConversations, setAllLoadedConversations] = useState<Conversation[]>([])
-  const [isLoadingMore, setIsLoadingMore] = useState(false) // Declared isLoadingMore
-  // const [hasMoreConversations, setHasMoreConversations] = useState(true)
-  // const CONVERSATIONS_PER_PAGE = 50
+  const [messagesPage, setMessagesPage] = useState(0)
+  const [allMessages, setAllMessages] = useState<Message[]>([])
+  const [hasMoreMessages, setHasMoreMessages] = useState(true)
+  const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false)
+  const MESSAGES_LIMIT = 100
+
+  const [allConversations, setAllConversations] = useState<Conversation[]>([])
+  const [displayedAllCount, setDisplayedAllCount] = useState(CONVERSATIONS_PER_PAGE)
+  const [conversationsPage, setConversationsPage] = useState(0)
+  const [hasMoreConversations, setHasMoreConversations] = useState(true)
+  const [isLoadingMoreConversations, setIsLoadingMoreConversations] = useState(false)
 
   const searchRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -107,61 +116,62 @@ export function WhatsAppInbox() {
   const [isExportMode, setIsExportMode] = useState(false)
 
   const { data: conversationsData, mutate: mutateConversations } = useSWR(`/api/conversations`, fetcher, {
-    refreshInterval: 15000, // 15 ثانية
-    dedupingInterval: 7500, // 7.5 ثانية
+    refreshInterval: 60000, // زيادة من 10 ثوانٍ إلى 60 ثانية
+    dedupingInterval: 30000, // زيادة من 5 ثوانٍ إلى 30 ثانية
     revalidateOnFocus: true,
     revalidateOnReconnect: true,
   })
 
-  const conversations = conversationsData?.conversations || []
-  // const totalConversations = conversationsData?.total || 0 // لم نعد نستخدم totalConversations
+  useEffect(() => {
+    if (conversationsData?.conversations) {
+      console.log(`[v0] Loaded ${conversationsData.conversations.length} conversations from API`) // إضافة console.log لتتبع عدد المحادثات
+      setAllConversations(conversationsData.conversations)
+      setHasMoreConversations(false) // لا توجد محادثات إضافية
+      setIsLoadingMoreConversations(false)
+    }
+  }, [conversationsData])
 
-  // useEffect(() => {
-  //   if (conversationsData?.conversations) {
-  //     if (page === 1) {
-  //       setAllLoadedConversations(conversationsData.conversations)
-  //     } else {
-  //       setAllLoadedConversations((prev) => {
-  //         const existingIds = new Set(prev.map((c) => c.phone_number))
-  //         const newConversations = conversationsData.conversations.filter(
-  //           (c: Conversation) => !existingIds.has(c.phone_number),
-  //         )
-  //         return [...prev, ...newConversations]
-  //       })
-  //     }
-  //     setHasMoreConversations(conversationsData.hasMore || false)
-  //     setIsLoadingMore(false)
-  //   }
-  // }, [conversationsData, page])
-
-  // useEffect(() => {
-  //   setPage(1)
-  //   setAllLoadedConversations([])
-  //   setHasMoreConversations(true)
-  // }, [activeFilter])
-
-  // useEffect(() => {
-  //   if (!isLoadingMore && hasMoreConversations && allLoadedConversations.length > 0) {
-  //     const timer = setTimeout(() => {
-  //       setIsLoadingMore(true)
-  //       setPage((prev) => prev + 1)
-  //     }, 1000) // تحميل كل ثانية
-
-  //     return () => clearTimeout(timer)
-  //   }
-  // }, [isLoadingMore, hasMoreConversations, allLoadedConversations.length])
+  const conversations = allConversations
 
   const { data: messagesData, mutate: mutateMessages } = useSWR(
-    selectedConversation ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}` : null,
+    selectedConversation
+      ? `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}?limit=${MESSAGES_LIMIT}&offset=${messagesPage * MESSAGES_LIMIT}`
+      : null,
     fetcher,
     {
-      refreshInterval: 10000, // 10 ثوانٍ
-      dedupingInterval: 5000, // 5 ثوانٍ
+      refreshInterval: 60000, // زيادة من 10 ثوانٍ إلى 60 ثانية
+      dedupingInterval: 30000, // زيادة من 5 ثوانٍ إلى 30 ثانية
       revalidateOnFocus: true,
     },
   )
 
-  const conversationMessages: Message[] = messagesData?.messages || []
+  const conversationMessages: Message[] = allMessages
+
+  useEffect(() => {
+    if (messagesData?.messages) {
+      if (messagesPage === 0) {
+        // الصفحة الأولى: استبدال جميع الرسائل
+        setAllMessages(messagesData.messages)
+      } else {
+        // الصفحات التالية: إضافة الرسائل الجديدة
+        setAllMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id))
+          const newMessages = messagesData.messages.filter((m: Message) => !existingIds.has(m.id))
+          return [...prev, ...newMessages]
+        })
+      }
+      setHasMoreMessages(messagesData.hasMore || false)
+      setIsLoadingMoreMessages(false)
+    }
+  }, [messagesData, messagesPage])
+
+  useEffect(() => {
+    if (selectedConversation) {
+      setMessagesPage(0)
+      setAllMessages([])
+      setHasMoreMessages(true)
+    }
+  }, [selectedConversation])
 
   useEffect(() => {
     if (conversationMessages.length > 0 && isAtBottom) {
@@ -176,15 +186,21 @@ export function WhatsAppInbox() {
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const distanceFromTop = scrollTop
 
       const atBottom = distanceFromBottom < 100
       setIsAtBottom(atBottom)
       setShowScrollButton(!atBottom)
+
+      if (distanceFromTop < 100 && hasMoreMessages && !isLoadingMoreMessages) {
+        setIsLoadingMoreMessages(true)
+        setMessagesPage((prev) => prev + 1)
+      }
     }
 
     container.addEventListener("scroll", handleScroll)
     return () => container.removeEventListener("scroll", handleScroll)
-  }, [selectedConversation])
+  }, [selectedConversation, hasMoreMessages, isLoadingMoreMessages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -241,7 +257,7 @@ export function WhatsAppInbox() {
           mutateConversations()
 
           const freshData = await fetch(
-            `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}`,
+            `/api/conversations/${encodeURIComponent(selectedConversation.phone_number)}?limit=${MESSAGES_LIMIT}&offset=0`,
           ).then((res) => res.json())
 
           return freshData
@@ -269,30 +285,35 @@ export function WhatsAppInbox() {
   }
 
   const formatTimestamp = (timestamp: number | string) => {
+    // تحويل timestamp إلى Date object
     const date = typeof timestamp === "number" ? new Date(timestamp * 1000) : new Date(timestamp)
-    const now = new Date()
 
-    const dateAtMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    // تحويل التاريخ إلى توقيت مكة المكرمة (UTC+3)
+    const meccaTime = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Riyadh" }))
+    const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Riyadh" }))
+
+    const dateAtMidnight = new Date(meccaTime.getFullYear(), meccaTime.getMonth(), meccaTime.getDate())
     const nowAtMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 
     const diffInMs = nowAtMidnight.getTime() - dateAtMidnight.getTime()
     const days = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
 
     if (days === 0) {
-      // اليوم: عرض الوقت فقط
-      return date.toLocaleTimeString("en-US", {
+      // اليوم: عرض الوقت فقط بتوقيت مكة
+      return meccaTime.toLocaleTimeString("ar-SA", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
+        timeZone: "Asia/Riyadh",
       })
     } else if (days === 1) {
       // أمس
       return "أمس"
     } else if (days < 7) {
       // من 2-6 أيام: عرض اسم اليوم
-      return date.toLocaleDateString("ar-EG", {
+      return meccaTime.toLocaleDateString("ar-SA", {
         weekday: "long",
-        calendar: "gregory",
+        timeZone: "Asia/Riyadh",
       })
     } else if (days < 14) {
       // أسبوع واحد (7-13 يوم)
@@ -314,12 +335,12 @@ export function WhatsAppInbox() {
       const months = Math.floor(days / 30)
       return `${months} ${months === 1 ? "شهر" : months === 2 ? "شهرين" : "أشهر"}`
     } else {
-      // سنة أو أكثر: عرض التاريخ الكامل بالتقويم الميلادي
-      return date.toLocaleDateString("en-GB", {
+      // سنة أو أكثر: عرض التاريخ الكامل بالتقويم الميلادي وتوقيت مكة
+      return meccaTime.toLocaleDateString("ar-SA", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
-        calendar: "gregory",
+        timeZone: "Asia/Riyadh",
       })
     }
   }
@@ -342,17 +363,27 @@ export function WhatsAppInbox() {
     )
     .filter((conv) => {
       if (activeFilter === "unread") {
-        return !conv.is_read && conv.unread_count > 0
+        return conv.unread_count > 0
       }
       if (activeFilter === "conversations") {
+        // فلتر "المحادثات": المحادثات التي تحتوي على رسائل واردة
         return conv.has_incoming_messages === true
       }
       return true // "الكل"
     })
 
+  console.log(`[v0] Displaying ${filteredConversations.length} conversations (filter: ${activeFilter})`) // إضافة console.log لتتبع عدد المحادثات المعروضة
+
   const searchSuggestions = searchQuery.trim() ? filteredConversations.slice(0, 5) : []
 
-  const displayedConversations = filteredConversations
+  const displayedConversations =
+    activeFilter === "all" ? filteredConversations.slice(0, displayedAllCount) : filteredConversations
+
+  const loadMoreAllConversations = () => {
+    setDisplayedAllCount((prev) => prev + CONVERSATIONS_PER_PAGE)
+  }
+
+  const hasMoreAllConversations = activeFilter === "all" && displayedAllCount < filteredConversations.length
 
   const handleSelectConversation = (conversation: Conversation) => {
     setSelectedConversation(conversation)
@@ -409,10 +440,9 @@ export function WhatsAppInbox() {
   useEffect(() => {
     const supabase = createClient()
 
-    console.log("[v0] Setting up Supabase Realtime subscription for webhook_messages...")
+    console.log("[v0] Setting up Supabase Realtime subscriptions...")
 
-    // الاستماع إلى INSERT events في جدول webhook_messages
-    const channel = supabase
+    const webhookChannel = supabase
       .channel("webhook_messages_changes")
       .on(
         "postgres_changes",
@@ -422,25 +452,129 @@ export function WhatsAppInbox() {
           table: "webhook_messages",
         },
         (payload) => {
-          console.log("[v0] New message received via Realtime:", payload.new)
-          // إعادة جلب المحادثات فوراً عند استقبال رسالة جديدة
-          mutateConversations()
+          console.log("[v0] New incoming message received via Realtime:", payload.new)
+
+          const newMessage = payload.new as any
+          const phoneNumber = newMessage.from_number
+          const contactName = newMessage.from_name || phoneNumber
+          const messageText = newMessage.message_text || "رسالة"
+          const timestamp = newMessage.timestamp || new Date().toISOString()
+
+          setAllConversations((prevConversations) => {
+            const existingIndex = prevConversations.findIndex((conv) => conv.phone_number === phoneNumber)
+
+            if (existingIndex !== -1) {
+              // تحديث محادثة موجودة
+              const updatedConversations = [...prevConversations]
+              const existingConv = updatedConversations[existingIndex]
+
+              updatedConversations[existingIndex] = {
+                ...existingConv,
+                last_message_text: messageText,
+                last_message_time: timestamp,
+                last_activity: timestamp,
+                last_incoming_message_text: messageText,
+                unread_count: (existingConv.unread_count || 0) + 1,
+                has_incoming_messages: true,
+                last_message_is_outgoing: false,
+              }
+
+              // نقل المحادثة إلى الأعلى
+              const [updated] = updatedConversations.splice(existingIndex, 1)
+              return [updated, ...updatedConversations]
+            } else {
+              // إنشاء محادثة جديدة
+              const newConversation: Conversation = {
+                phone_number: phoneNumber,
+                contact_name: contactName,
+                unread_count: 1,
+                last_message_text: messageText,
+                last_message_time: timestamp,
+                last_activity: timestamp,
+                last_incoming_message_text: messageText,
+                has_incoming_messages: true,
+                has_replies: false,
+                is_read: false,
+                has_replied: false,
+                last_message_is_outgoing: false,
+              }
+
+              return [newConversation, ...prevConversations]
+            }
+          })
 
           // إظهار إشعار للمستخدم
           toast({
             title: "رسالة جديدة",
-            description: "تم استقبال رسالة جديدة",
+            description: `من ${contactName}`,
           })
+
+          setTimeout(() => {
+            mutateConversations(undefined, { revalidate: true })
+          }, 3000)
         },
       )
       .subscribe((status) => {
-        console.log("[v0] Realtime subscription status:", status)
+        console.log("[v0] webhook_messages Realtime subscription status:", status)
       })
 
-    // تنظيف الاشتراك عند إلغاء تحميل المكون
+    const messageHistoryChannel = supabase
+      .channel("message_history_changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "message_history",
+        },
+        (payload) => {
+          console.log("[v0] New outgoing message received via Realtime:", payload.new)
+
+          const newMessage = payload.new as any
+          const phoneNumber = newMessage.to_number
+          const messageText = newMessage.message_text || "رسالة"
+          const timestamp = newMessage.created_at || new Date().toISOString()
+
+          setAllConversations((prevConversations) => {
+            const existingIndex = prevConversations.findIndex((conv) => conv.phone_number === phoneNumber)
+
+            if (existingIndex !== -1) {
+              // تحديث محادثة موجودة
+              const updatedConversations = [...prevConversations]
+              const existingConv = updatedConversations[existingIndex]
+
+              updatedConversations[existingIndex] = {
+                ...existingConv,
+                last_message_text: messageText,
+                last_message_time: timestamp,
+                last_activity: timestamp,
+                has_replied: true,
+                unread_count: 0, // تصفير العداد عند الرد
+                last_message_is_outgoing: true,
+              }
+
+              // نقل المحادثة إلى الأعلى
+              const [updated] = updatedConversations.splice(existingIndex, 1)
+              return [updated, ...updatedConversations]
+            }
+
+            return prevConversations
+          })
+
+          setTimeout(() => {
+            mutateConversations(undefined, { revalidate: true })
+          }, 3000)
+        },
+      )
+      .subscribe((status) => {
+        console.log("[v0] message_history Realtime subscription status:", status)
+      })
+
+    // تنظيف الاشتراكات عند إلغاء تحميل المكون
     return () => {
-      console.log("[v0] Cleaning up Supabase Realtime subscription...")
-      supabase.removeChannel(channel)
+      console.log("[v0] Cleaning up Supabase Realtime subscriptions...")
+      supabase.removeChannel(webhookChannel)
+      supabase.removeChannel(messageHistoryChannel)
     }
   }, [mutateConversations, toast])
 
@@ -730,6 +864,17 @@ export function WhatsAppInbox() {
     }
   }
 
+  const loadMoreConversations = () => {
+    if (!isLoadingMoreConversations && hasMoreConversations) {
+      setIsLoadingMoreConversations(true)
+      setConversationsPage((prev) => prev + 1)
+    }
+  }
+
+  useEffect(() => {
+    setDisplayedAllCount(CONVERSATIONS_PER_PAGE)
+  }, [activeFilter])
+
   if (!conversationsData) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#111b21]">
@@ -982,7 +1127,7 @@ export function WhatsAppInbox() {
 
         {/* Conversations List */}
         <div ref={conversationsListRef} className="flex-1 overflow-y-auto">
-          {displayedConversations.length === 0 && !isLoadingMore ? ( // Corrected condition
+          {displayedConversations.length === 0 && !isLoadingMoreConversations ? ( // Corrected condition
             <div className="flex flex-col items-center justify-center p-8 text-[#667781]">
               <MessageSquare className="h-12 w-12 md:h-24 md:w-24 mx-auto mb-4 opacity-20" />
               <p className="text-sm md:text-base">
@@ -1059,7 +1204,7 @@ export function WhatsAppInbox() {
                               conversation.unread_count > 0 ? "text-white font-bold" : "text-white"
                             }`}
                           >
-                            {conversation.contact_name}
+                            {conversation.contact_name || conversation.phone_number}
                           </h3>
                           {conversation.unread_count > 0 && (
                             <span className="bg-[#25d366] text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">
@@ -1097,6 +1242,17 @@ export function WhatsAppInbox() {
                   </div>
                 </div>
               ))}
+
+              {hasMoreAllConversations && (
+                <div className="p-3 flex justify-center">
+                  <Button
+                    onClick={loadMoreAllConversations}
+                    className="bg-[#00a884] hover:bg-[#06cf9c] text-white px-6 py-2 rounded-lg text-sm font-medium"
+                  >
+                    تحميل المزيد ({filteredConversations.length - displayedAllCount} محادثة)
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1171,6 +1327,13 @@ export function WhatsAppInbox() {
               </div>
             ) : (
               <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
+                {isLoadingMoreMessages && (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="h-6 w-6 animate-spin text-[#00a884]" />
+                    <span className="text-[#8696a0] text-sm mr-2">جاري تحميل المزيد...</span>
+                  </div>
+                )}
+
                 {conversationMessages.map((message) => {
                   const isOutgoing = message.type === "outgoing"
                   const messageText = message.message_text || "رسالة"
@@ -1249,6 +1412,7 @@ export function WhatsAppInbox() {
                             <img
                               src={mediaUrl || "/placeholder.svg"}
                               alt="صورة"
+                              loading="lazy"
                               className="w-full h-auto max-h-[300px] object-cover"
                               onError={() => {
                                 if (rawMediaUrl) {

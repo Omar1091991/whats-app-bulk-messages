@@ -19,11 +19,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "WhatsApp not configured" }, { status: 500 })
     }
 
-    const mediaInfoResponse = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
-      headers: {
-        Authorization: `Bearer ${settings.access_token}`,
-      },
-    })
+    let mediaInfoResponse
+    try {
+      mediaInfoResponse = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+        headers: {
+          Authorization: `Bearer ${settings.access_token}`,
+        },
+      })
+    } catch (fetchError) {
+      console.log(
+        `[v0] Network error fetching media info for ${mediaId}:`,
+        fetchError instanceof Error ? fetchError.message : "Unknown error",
+      )
+      return NextResponse.json(
+        {
+          error: "Network error",
+          expired: true,
+        },
+        { status: 410 },
+      )
+    }
 
     if (!mediaInfoResponse.ok) {
       const errorData = await mediaInfoResponse.json()
@@ -40,15 +55,16 @@ export async function GET(request: NextRequest) {
         ) // 410 Gone status for expired resources
       }
 
-      console.error("[v0] Failed to fetch media info:", errorData)
-      return NextResponse.json({ error: "Failed to fetch media info" }, { status: 500 })
+      console.log(`[v0] Failed to fetch media info for ${mediaId}:`, errorData.error?.message || "Unknown error")
+      return NextResponse.json({ error: "Failed to fetch media info", expired: true }, { status: 410 })
     }
 
     const mediaInfo = await mediaInfoResponse.json()
     const mediaUrl = mediaInfo.url
 
     if (!mediaUrl) {
-      return NextResponse.json({ error: "Media URL not found" }, { status: 404 })
+      console.log(`[v0] Media URL not found for ${mediaId}`)
+      return NextResponse.json({ error: "Media URL not found", expired: true }, { status: 410 })
     }
 
     const imageResponse = await fetch(mediaUrl, {
@@ -58,8 +74,8 @@ export async function GET(request: NextRequest) {
     })
 
     if (!imageResponse.ok) {
-      console.error("[v0] Failed to download image:", await imageResponse.text())
-      return NextResponse.json({ error: "Failed to download image" }, { status: 500 })
+      console.log(`[v0] Failed to download image for ${mediaId}:`, imageResponse.status)
+      return NextResponse.json({ error: "Failed to download image", expired: true }, { status: 410 })
     }
 
     const imageBuffer = await imageResponse.arrayBuffer()
@@ -69,10 +85,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ dataUrl, mimeType })
   } catch (error) {
-    console.error("[v0] Error fetching WhatsApp media:", error)
+    console.log("[v0] Error fetching WhatsApp media:", error instanceof Error ? error.message : "Unknown error")
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch media" },
-      { status: 500 },
+      { error: error instanceof Error ? error.message : "Failed to fetch media", expired: true },
+      { status: 410 },
     )
   }
 }

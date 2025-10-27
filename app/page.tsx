@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
-import { ar } from "date-fns/locale"
+import { ar } from "date-fns/locale" // Fixed date-fns locale import for v4
 import { RateLimitDisplay } from "@/components/rate-limit-display"
 
 interface Stats {
