@@ -172,9 +172,12 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
           }
         }
 
-        allConversations = Array.from(conversationsMap.values()).sort(
-          (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
-        )
+        allConversations = Array.from(conversationsMap.values()).sort((a, b) => {
+          // استخدام آخر رسالة واردة للترتيب، مع fallback إلى آخر رسالة بشكل عام
+          const aTime = a.last_incoming_message_time || a.last_message_time
+          const bTime = b.last_incoming_message_time || b.last_message_time
+          return new Date(bTime).getTime() - new Date(aTime).getTime()
+        })
 
         console.log(`[v0] Built ${allConversations.length} conversations`)
 

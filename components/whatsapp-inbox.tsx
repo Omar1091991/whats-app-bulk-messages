@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import useSWR from "swr"
+import { createClient } from "@/lib/supabase/client"
 
 interface Conversation {
   phone_number: string
@@ -278,13 +279,48 @@ export function WhatsAppInbox() {
     const days = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
 
     if (days === 0) {
-      return date.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })
+      // اليوم: عرض الوقت فقط
+      return date.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
     } else if (days === 1) {
+      // أمس
       return "أمس"
     } else if (days < 7) {
-      return date.toLocaleDateString("ar-SA", { weekday: "long" })
+      // من 2-6 أيام: عرض اسم اليوم
+      return date.toLocaleDateString("ar-EG", {
+        weekday: "long",
+        calendar: "gregory",
+      })
+    } else if (days < 14) {
+      // أسبوع واحد (7-13 يوم)
+      return "أسبوع"
+    } else if (days < 21) {
+      // أسبوعين (14-20 يوم)
+      return "أسبوعين"
+    } else if (days < 28) {
+      // 3 أسابيع (21-27 يوم)
+      return "3 أسابيع"
+    } else if (days < 60) {
+      // شهر واحد (28-59 يوم)
+      return "شهر"
+    } else if (days < 90) {
+      // شهرين (60-89 يوم)
+      return "شهرين"
+    } else if (days < 365) {
+      // أقل من سنة: عرض عدد الأشهر
+      const months = Math.floor(days / 30)
+      return `${months} ${months === 1 ? "شهر" : months === 2 ? "شهرين" : "أشهر"}`
     } else {
-      return date.toLocaleDateString("ar-SA", { day: "numeric", month: "numeric", year: "numeric" })
+      // سنة أو أكثر: عرض التاريخ الكامل بالتقويم الميلادي
+      return date.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        calendar: "gregory",
+      })
     }
   }
 
@@ -369,6 +405,44 @@ export function WhatsAppInbox() {
       setPreviousUnreadCounts(newUnreadCounts)
     }
   }, [conversationsData])
+
+  useEffect(() => {
+    const supabase = createClient()
+
+    console.log("[v0] Setting up Supabase Realtime subscription for webhook_messages...")
+
+    // الاستماع إلى INSERT events في جدول webhook_messages
+    const channel = supabase
+      .channel("webhook_messages_changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "webhook_messages",
+        },
+        (payload) => {
+          console.log("[v0] New message received via Realtime:", payload.new)
+          // إعادة جلب المحادثات فوراً عند استقبال رسالة جديدة
+          mutateConversations()
+
+          // إظهار إشعار للمستخدم
+          toast({
+            title: "رسالة جديدة",
+            description: "تم استقبال رسالة جديدة",
+          })
+        },
+      )
+      .subscribe((status) => {
+        console.log("[v0] Realtime subscription status:", status)
+      })
+
+    // تنظيف الاشتراك عند إلغاء تحميل المكون
+    return () => {
+      console.log("[v0] Cleaning up Supabase Realtime subscription...")
+      supabase.removeChannel(channel)
+    }
+  }, [mutateConversations, toast])
 
   const isMediaId = (url: string | null): boolean => {
     if (!url) return false

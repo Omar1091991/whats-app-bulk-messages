@@ -1,5 +1,5 @@
 import type React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
@@ -12,7 +12,12 @@ export const metadata: Metadata = {
   title: "Rose Smile - WhatsApp Bulk Messaging",
   description: "Send bulk WhatsApp messages to your customers",
   generator: "v0.app",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=5",
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 }
 
 export default function RootLayout({
