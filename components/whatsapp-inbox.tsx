@@ -790,19 +790,20 @@ export function WhatsAppInbox() {
 
       if (!response.ok) throw new Error("فشل في تصدير المحادثات")
 
-      const blob = await response.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = downloadUrl
-      a.download = `all-conversations-${new Date().toISOString().split("T")[0]}.html`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(downloadUrl)
-      document.body.removeChild(a)
+      const htmlText = await response.text()
+      const printWindow = window.open("", "_blank")
+      if (printWindow) {
+        printWindow.document.write(htmlText)
+        printWindow.document.close()
+        // الانتظار حتى يتم تحميل المحتوى ثم فتح نافذة الطباعة
+        printWindow.onload = () => {
+          printWindow.print()
+        }
+      }
 
       toast({
-        title: "تم التصدير بنجاح",
-        description: `تم تصدير ${conversations.length} محادثة بصيغة PDF`,
+        title: "تم فتح نافذة الطباعة",
+        description: `جاهز لطباعة ${conversations.length} محادثة`,
       })
     } catch (error) {
       toast({
@@ -837,19 +838,20 @@ export function WhatsAppInbox() {
 
       if (!response.ok) throw new Error("فشل في تصدير المحادثات")
 
-      const blob = await response.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = downloadUrl
-      a.download = `selected-conversations-${new Date().toISOString().split("T")[0]}.html`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(downloadUrl)
-      document.body.removeChild(a)
+      const htmlText = await response.text()
+      const printWindow = window.open("", "_blank")
+      if (printWindow) {
+        printWindow.document.write(htmlText)
+        printWindow.document.close()
+        // الانتظار حتى يتم تحميل المحتوى ثم فتح نافذة الطباعة
+        printWindow.onload = () => {
+          printWindow.print()
+        }
+      }
 
       toast({
-        title: "تم التصدير بنجاح",
-        description: `تم تصدير ${selectedConversations.size} محادثة بصيغة PDF`,
+        title: "تم فتح نافذة الطباعة",
+        description: `جاهز لطباعة ${selectedConversations.size} محادثة`,
       })
 
       cancelExportMode()
