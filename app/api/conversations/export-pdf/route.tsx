@@ -6,8 +6,46 @@ function normalizePhoneNumber(phone: string): string {
   return cleaned.startsWith("0") ? cleaned.substring(1) : cleaned
 }
 
-function formatDateTimeForExport(dateString: string) {
-  const date = new Date(dateString)
+function formatDateTimeForExport(dateString: string | number) {
+  let date: Date
+
+  if (typeof dateString === "number") {
+    // إذا كان رقم، نتحقق إذا كان بالـ seconds أو milliseconds
+    // Unix timestamps بالـ seconds عادة أقل من 10^10 (10 أرقام)
+    // Unix timestamps بالـ milliseconds عادة أكبر من 10^12 (13 رقم)
+    if (dateString < 10000000000) {
+      // timestamp بالـ seconds، نحوله إلى milliseconds
+      console.log(`[v0] Converting timestamp from seconds to milliseconds: ${dateString}`)
+      date = new Date(dateString * 1000)
+    } else {
+      // timestamp بالـ milliseconds
+      date = new Date(dateString)
+    }
+  } else if (typeof dateString === "string") {
+    // إذا كان string، نحاول تحويله
+    const parsed = Date.parse(dateString)
+    if (isNaN(parsed)) {
+      // إذا فشل التحويل، نحاول كـ Unix timestamp
+      const numericValue = Number.parseInt(dateString, 10)
+      if (!isNaN(numericValue)) {
+        if (numericValue < 10000000000) {
+          date = new Date(numericValue * 1000)
+        } else {
+          date = new Date(numericValue)
+        }
+      } else {
+        console.error(`[v0] Invalid date format: ${dateString}`)
+        date = new Date()
+      }
+    } else {
+      date = new Date(parsed)
+    }
+  } else {
+    console.error(`[v0] Unknown date type: ${typeof dateString}`)
+    date = new Date()
+  }
+
+  console.log(`[v0] Original timestamp: ${dateString}, Converted date: ${date.toISOString()}`)
 
   // تحويل التاريخ إلى توقيت مكة المكرمة (Asia/Riyadh - UTC+3) بالتقويم الميلادي
   const formattedDate = date.toLocaleDateString("en-GB", {
