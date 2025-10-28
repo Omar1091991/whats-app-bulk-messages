@@ -77,7 +77,7 @@ export function WhatsAppInbox() {
   const [isSending, setIsSending] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false)
-  const [activeFilter, setActiveFilter] = useState<FilterType>("all")
+  const [activeFilter, setActiveFilter] = useState<FilterType>("unread") // تغيير الفلتر الافتراضي من "all" إلى "unread"
   const [viewedConversations, setViewedConversations] = useState<Set<string>>(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("viewedConversations")
@@ -1093,14 +1093,14 @@ export function WhatsAppInbox() {
         <div className="px-2 pb-2 bg-[#111b21] flex-shrink-0">
           <div className="flex gap-2 bg-[#202c33] rounded-lg p-1">
             <button
-              onClick={() => setActiveFilter("all")}
+              onClick={() => setActiveFilter("conversations")}
               className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-all ${
-                activeFilter === "all"
+                activeFilter === "conversations"
                   ? "bg-[#00a884] text-white shadow-sm"
                   : "text-[#8696a0] hover:text-white hover:bg-[#2a3942]"
               }`}
             >
-              الكل
+              المحادثات
             </button>
             <button
               onClick={() => setActiveFilter("unread")}
@@ -1113,14 +1113,14 @@ export function WhatsAppInbox() {
               غير مقروء
             </button>
             <button
-              onClick={() => setActiveFilter("conversations")}
+              onClick={() => setActiveFilter("all")}
               className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-all ${
-                activeFilter === "conversations"
+                activeFilter === "all"
                   ? "bg-[#00a884] text-white shadow-sm"
                   : "text-[#8696a0] hover:text-white hover:bg-[#2a3942]"
               }`}
             >
-              المحادثات
+              الكل
             </button>
           </div>
         </div>
@@ -1206,11 +1206,6 @@ export function WhatsAppInbox() {
                           >
                             {conversation.contact_name || conversation.phone_number}
                           </h3>
-                          {conversation.unread_count > 0 && (
-                            <span className="bg-[#25d366] text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">
-                              جديد
-                            </span>
-                          )}
                         </div>
                         <span className="text-[10px] md:text-xs text-[#667781] ml-2 flex-shrink-0">
                           {formatTimestamp(conversation.last_message_time)}

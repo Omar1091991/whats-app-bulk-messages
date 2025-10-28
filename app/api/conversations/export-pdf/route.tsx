@@ -2,7 +2,29 @@ import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
 function normalizePhoneNumber(phone: string): string {
-  return phone.replace(/\D/g, "")
+  const cleaned = phone.replace(/\D/g, "")
+  return cleaned.startsWith("0") ? cleaned.substring(1) : cleaned
+}
+
+function formatDateTimeForExport(dateString: string) {
+  const date = new Date(dateString)
+
+  // تحويل التاريخ إلى توقيت مكة المكرمة (Asia/Riyadh - UTC+3) بالتقويم الميلادي
+  const formattedDate = date.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+
+  const formattedTime = date.toLocaleTimeString("ar-SA", {
+    timeZone: "Asia/Riyadh",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+
+  return { date: formattedDate, time: formattedTime }
 }
 
 export async function GET(request: NextRequest) {
@@ -16,7 +38,7 @@ export async function GET(request: NextRequest) {
     const { data: incomingMessages, error: incomingError } = await supabaseClient
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
-      .order("timestamp", { ascending: false })
+      .order("timestamp", { ascending: true })
 
     if (incomingError) throw incomingError
 
@@ -41,7 +63,7 @@ export async function GET(request: NextRequest) {
     }
 
     let conversations = Array.from(conversationsMap.values()).sort(
-      (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
+      (a, b) => new Date(a.last_message_time).getTime() - new Date(b.last_message_time).getTime(),
     )
 
     // تطبيق الفلتر
@@ -52,6 +74,8 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(`[v0] Exporting ${conversations.length} conversations to PDF`)
+
+    const exportDateTime = formatDateTimeForExport(new Date().toISOString())
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -135,7 +159,7 @@ export async function GET(request: NextRequest) {
 <body>
   <div class="header">
     <h1>تقرير الرسائل الواردة من العملاء</h1>
-    <p>تاريخ التصدير: ${new Date().toLocaleDateString("ar-SA")} - ${new Date().toLocaleTimeString("ar-SA")}</p>
+    <p>تاريخ التصدير: ${exportDateTime.date} - ${exportDateTime.time} (توقيت مكة المكرمة)</p>
     <p>عدد الرسائل: ${conversations.length}</p>
   </div>
   
@@ -153,14 +177,14 @@ export async function GET(request: NextRequest) {
     <tbody>
       ${conversations
         .map((conv: any) => {
-          const messageDate = new Date(conv.last_message_time)
+          const { date, time } = formatDateTimeForExport(conv.last_message_time)
           return `
         <tr>
           <td>${conv.contact_name}</td>
           <td>${conv.phone_number}</td>
           <td>${conv.last_message_text}</td>
-          <td>${messageDate.toLocaleDateString("ar-SA")}</td>
-          <td>${messageDate.toLocaleTimeString("ar-SA")}</td>
+          <td>${date}</td>
+          <td>${time}</td>
           <td>${conv.unread_count > 0 ? `<span class="unread-badge">غير مقروء</span>` : "مقروء"}</td>
         </tr>
       `
@@ -171,6 +195,7 @@ export async function GET(request: NextRequest) {
   
   <div class="footer">
     <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء فقط</p>
+    <p>جميع الأوقات بتوقيت مكة المكرمة (UTC+3) - مرتبة من الأقدم إلى الأحدث</p>
   </div>
 </body>
 </html>
@@ -197,22 +222,77 @@ export async function POST(request: NextRequest) {
     }
 
     const supabaseClient = await createClient()
-    const normalizedPhones = phoneNumbers.map((phone: string) => normalizePhoneNumber(phone))
+
+    console.log("[v0] Exporting selected phones:", phoneNumbers)
+
+    console.log("[v0] Fetching all incoming messages to understand phone format...")
+    const { data: allIncoming, error: allError } = await supabaseClient
+      .from("webhook_messages")
+      .select("from_number, from_name, message_text, timestamp, replied, status")
+      .order("timestamp", { ascending: true })
+      .limit(10)
+
+    if (allError) throw allError
+
+    console.log("[v0] Sample phone numbers from database:", allIncoming?.map((m) => m.from_number).slice(0, 5))
 
     console.log("[v0] Exporting selected incoming messages only to PDF")
+
+    // إنشاء قائمة بجميع التنسيقات الممكنة للأرقام
+    const phoneVariants: string[] = []
+    for (const phone of phoneNumbers) {
+      const normalized = normalizePhoneNumber(phone)
+      phoneVariants.push(phone) // الرقم الأصلي
+      phoneVariants.push(normalized) // الرقم المعياري
+      phoneVariants.push(`+${normalized}`) // مع +
+      phoneVariants.push(`0${normalized.slice(3)}`) // مع 0 بدلاً من رمز الدولة
+      phoneVariants.push(normalized.slice(3)) // بدون رمز الدولة
+      phoneVariants.push(normalized.slice(-9)) // آخر 9 أرقام فقط
+    }
+
+    console.log("[v0] Phone variants to search:", phoneVariants.slice(0, 10))
+
     const { data: incomingMessages, error: incomingError } = await supabaseClient
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
-      .order("timestamp", { ascending: false })
+      .in("from_number", phoneVariants)
+      .order("timestamp", { ascending: true })
 
     if (incomingError) throw incomingError
 
-    // تصفية الرسائل للأرقام المحددة فقط
-    const filteredIncoming = (incomingMessages || []).filter((msg) =>
-      normalizedPhones.includes(normalizePhoneNumber(msg.from_number)),
-    )
+    console.log(`[v0] Fetched ${incomingMessages?.length || 0} incoming messages using .in() query`)
 
-    console.log(`[v0] Fetched ${filteredIncoming.length} incoming messages for selected phones`)
+    let filteredIncoming = incomingMessages || []
+
+    if (filteredIncoming.length === 0) {
+      console.log("[v0] No messages found with .in() query, trying manual filtering...")
+      const { data: allMessages, error: allMessagesError } = await supabaseClient
+        .from("webhook_messages")
+        .select("from_number, from_name, message_text, timestamp, replied, status")
+        .order("timestamp", { ascending: true })
+
+      if (allMessagesError) throw allMessagesError
+
+      console.log(`[v0] Fetched ${allMessages?.length || 0} total incoming messages for manual filtering`)
+
+      filteredIncoming = (allMessages || []).filter((msg) => {
+        const normalizedMsgPhone = normalizePhoneNumber(msg.from_number)
+        const matches = phoneNumbers.some((phone) => {
+          const normalizedPhone = normalizePhoneNumber(phone)
+          // مطابقة كاملة
+          if (normalizedMsgPhone === normalizedPhone) return true
+          // مطابقة آخر 9 أرقام
+          if (normalizedMsgPhone.slice(-9) === normalizedPhone.slice(-9)) return true
+          return false
+        })
+        if (matches) {
+          console.log(`[v0] Matched: ${msg.from_number} with normalized: ${normalizedMsgPhone}`)
+        }
+        return matches
+      })
+
+      console.log(`[v0] Filtered to ${filteredIncoming.length} messages after manual filtering`)
+    }
 
     const conversationsMap = new Map<string, any>()
 
@@ -232,10 +312,12 @@ export async function POST(request: NextRequest) {
     }
 
     const conversations = Array.from(conversationsMap.values()).sort(
-      (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime(),
+      (a, b) => new Date(a.last_message_time).getTime() - new Date(b.last_message_time).getTime(),
     )
 
     console.log(`[v0] Exporting ${conversations.length} selected conversations to PDF`)
+
+    const exportDateTime = formatDateTimeForExport(new Date().toISOString())
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -319,7 +401,7 @@ export async function POST(request: NextRequest) {
 <body>
   <div class="header">
     <h1>تقرير الرسائل الواردة المحددة من العملاء</h1>
-    <p>تاريخ التصدير: ${new Date().toLocaleDateString("ar-SA")} - ${new Date().toLocaleTimeString("ar-SA")}</p>
+    <p>تاريخ التصدير: ${exportDateTime.date} - ${exportDateTime.time} (توقيت مكة المكرمة)</p>
     <p>عدد الرسائل: ${conversations.length}</p>
   </div>
   
@@ -337,14 +419,14 @@ export async function POST(request: NextRequest) {
     <tbody>
       ${conversations
         .map((conv: any) => {
-          const messageDate = new Date(conv.last_message_time)
+          const { date, time } = formatDateTimeForExport(conv.last_message_time)
           return `
         <tr>
           <td>${conv.contact_name}</td>
           <td>${conv.phone_number}</td>
           <td>${conv.last_message_text}</td>
-          <td>${messageDate.toLocaleDateString("ar-SA")}</td>
-          <td>${messageDate.toLocaleTimeString("ar-SA")}</td>
+          <td>${date}</td>
+          <td>${time}</td>
           <td>${conv.unread_count > 0 ? `<span class="unread-badge">غير مقروء</span>` : "مقروء"}</td>
         </tr>
       `
@@ -355,6 +437,7 @@ export async function POST(request: NextRequest) {
   
   <div class="footer">
     <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء فقط</p>
+    <p>جميع الأوقات بتوقيت مكة المكرمة (UTC+3) - مرتبة من الأقدم إلى الأحدث</p>
   </div>
 </body>
 </html>
