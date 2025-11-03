@@ -136,82 +136,99 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
 
         const conversationsMap = new Map<string, any>()
 
+        // دمج جميع الرسائل (واردة وصادرة) في مصفوفة واحدة مع نوع الرسالة
+        const allMessages: Array<{
+          phone: string
+          name: string | null
+          text: string | null
+          timestamp: string
+          type: "incoming" | "outgoing"
+          status: string
+          replied: boolean
+        }> = []
+
+        // إضافة الرسائل الواردة
         for (const msg of incomingMessages || []) {
-          const normalizedPhone = normalizePhoneNumber(msg.from_number)
-          const existing = conversationsMap.get(normalizedPhone)
-
-          if (!existing || new Date(msg.timestamp) > new Date(existing.last_message_time)) {
-            const isRead = msg.status === "read"
-            const hasReplied = msg.replied === true
-
-            const messageText = msg.message_text?.trim() || "رسالة واردة"
-
-            conversationsMap.set(normalizedPhone, {
-              phone_number: msg.from_number,
-              contact_name: msg.from_name || msg.from_number,
-              last_message_text: messageText,
-              last_incoming_message_text: messageText,
-              last_incoming_message_time: msg.timestamp,
-              last_message_time: msg.timestamp,
-              last_message_is_outgoing: false,
-              unread_count: isRead ? 0 : 1, // تُعتبر غير مقروءة إذا لم يكن status = "read"
-              is_read: isRead,
-              has_replied: hasReplied,
-              updated_at: msg.timestamp,
-              has_incoming_messages: true,
-            })
-          } else if (existing) {
-            // تحديث آخر رسالة واردة إذا كانت أحدث
-            if (new Date(msg.timestamp) > new Date(existing.last_incoming_message_time || 0)) {
-              const messageText = msg.message_text?.trim() || "رسالة واردة"
-              existing.last_incoming_message_text = messageText
-              existing.last_incoming_message_time = msg.timestamp
-            }
-
-            if (msg.replied === true) {
-              existing.has_replied = true
-            }
-
-            // تُعتبر غير مقروءة إذا status !== "read" فقط
-            if (msg.status !== "read") {
-              existing.unread_count = (existing.unread_count || 0) + 1
-            }
-          }
+          allMessages.push({
+            phone: msg.from_number,
+            name: msg.from_name,
+            text: msg.message_text,
+            timestamp: msg.timestamp,
+            type: "incoming",
+            status: msg.status,
+            replied: msg.replied === true,
+          })
         }
 
+        // إضافة الرسائل الصادرة
         for (const msg of outgoingMessages || []) {
-          const normalizedPhone = normalizePhoneNumber(msg.to_number)
+          allMessages.push({
+            phone: msg.to_number,
+            name: null,
+            text: msg.message_text,
+            timestamp: msg.created_at,
+            type: "outgoing",
+            status: msg.status || "sent",
+            replied: false,
+          })
+        }
+
+        // ترتيب جميع الرسائل حسب الوقت
+        allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+        // بناء المحادثات من جميع الرسائل
+        for (const msg of allMessages) {
+          const normalizedPhone = normalizePhoneNumber(msg.phone)
           const existing = conversationsMap.get(normalizedPhone)
 
-          const messageText = msg.message_text?.trim() || "رسالة صادرة"
+          const messageText = msg.text?.trim() || (msg.type === "incoming" ? "رسالة واردة" : "رسالة صادرة")
 
           if (!existing) {
+            // إنشاء محادثة جديدة
             conversationsMap.set(normalizedPhone, {
-              phone_number: msg.to_number,
-              contact_name: msg.to_number,
+              phone_number: msg.phone,
+              contact_name: msg.name || msg.phone,
               last_message_text: messageText,
-              last_incoming_message_text: null,
-              last_incoming_message_time: null,
-              last_message_time: msg.created_at,
-              last_message_is_outgoing: true,
-              unread_count: 0,
-              is_read: true,
-              has_replied: false,
-              updated_at: msg.created_at,
-              has_incoming_messages: false,
+              last_incoming_message_text: msg.type === "incoming" ? messageText : null,
+              last_incoming_message_time: msg.type === "incoming" ? msg.timestamp : null,
+              last_message_time: msg.timestamp, // آخر رسالة (واردة أو صادرة)
+              last_message_is_outgoing: msg.type === "outgoing",
+              unread_count: msg.type === "incoming" && msg.status !== "read" ? 1 : 0,
+              is_read: msg.type === "incoming" ? msg.status === "read" : true,
+              has_replied: msg.type === "incoming" ? msg.replied : false,
+              updated_at: msg.timestamp,
+              has_incoming_messages: msg.type === "incoming",
             })
-          } else if (new Date(msg.created_at) > new Date(existing.last_message_time)) {
+          } else {
+            // تحديث محادثة موجودة
+            // تحديث آخر رسالة (واردة أو صادرة) دائماً
             existing.last_message_text = messageText
-            existing.last_message_time = msg.created_at
-            existing.last_message_is_outgoing = true
-            existing.updated_at = msg.created_at
+            existing.last_message_time = msg.timestamp
+            existing.last_message_is_outgoing = msg.type === "outgoing"
+            existing.updated_at = msg.timestamp
+
+            if (msg.type === "incoming") {
+              // تحديث آخر رسالة واردة
+              existing.last_incoming_message_text = messageText
+              existing.last_incoming_message_time = msg.timestamp
+              existing.has_incoming_messages = true
+
+              if (msg.replied) {
+                existing.has_replied = true
+              }
+
+              // زيادة عداد غير المقروءة فقط إذا status !== "read"
+              if (msg.status !== "read") {
+                existing.unread_count = (existing.unread_count || 0) + 1
+                existing.is_read = false
+              }
+            }
           }
         }
 
+        // ترتيب المحادثات حسب آخر رسالة (واردة أو صادرة)
         allConversations = Array.from(conversationsMap.values()).sort((a, b) => {
-          const aTime = a.last_incoming_message_time || a.last_message_time
-          const bTime = b.last_incoming_message_time || b.last_message_time
-          return new Date(bTime).getTime() - new Date(aTime).getTime()
+          return new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
         })
 
         console.log(`[v0] Built ${allConversations.length} conversations`)

@@ -208,7 +208,7 @@ export async function GET(request: NextRequest) {
         <th>رقم الجوال</th>
         <th>نص الرسالة الواردة</th>
         <th>التاريخ</th>
-        <th>التوقيت</th>
+        <th>الوقت</th>
         <th>الحالة</th>
       </tr>
     </thead>
@@ -332,30 +332,68 @@ export async function POST(request: NextRequest) {
       console.log(`[v0] Filtered to ${filteredIncoming.length} messages after manual filtering`)
     }
 
-    const conversationsMap = new Map<string, any>()
+    const messagesByPhone = new Map<string, any>()
 
     for (const msg of filteredIncoming) {
       const normalizedPhone = normalizePhoneNumber(msg.from_number)
-      const existing = conversationsMap.get(normalizedPhone)
 
-      if (!existing || new Date(msg.timestamp) > new Date(existing.last_message_time)) {
-        conversationsMap.set(normalizedPhone, {
+      if (!messagesByPhone.has(normalizedPhone)) {
+        messagesByPhone.set(normalizedPhone, {
           phone_number: msg.from_number,
           contact_name: msg.from_name || msg.from_number,
-          last_message_text: msg.message_text || "رسالة",
-          last_message_time: msg.timestamp,
-          unread_count: msg.status === "unread" ? 1 : 0,
+          messages: [],
+          latest_timestamp: msg.timestamp,
+          latest_status: msg.status,
         })
+      }
+
+      const entry = messagesByPhone.get(normalizedPhone)!
+      entry.messages.push({
+        text: msg.message_text || "رسالة",
+        timestamp: msg.timestamp,
+        status: msg.status,
+      })
+
+      // تحديث آخر رسالة للحصول على آخر وقت وحالة
+      if (new Date(msg.timestamp).getTime() > new Date(entry.latest_timestamp).getTime()) {
+        entry.latest_timestamp = msg.timestamp
+        entry.latest_status = msg.status
       }
     }
 
-    const conversations = Array.from(conversationsMap.values()).sort(
-      (a, b) => new Date(a.last_message_time).getTime() - new Date(b.last_message_time).getTime(),
+    // ترتيب العملاء حسب آخر رسالة من الأقدم إلى الأحدث
+    const sortedConversations = Array.from(messagesByPhone.values()).sort(
+      (a, b) => new Date(a.latest_timestamp).getTime() - new Date(b.latest_timestamp).getTime(),
     )
 
-    console.log(`[v0] Exporting ${conversations.length} selected conversations to PDF`)
+    console.log(`[v0] Exporting ${sortedConversations.length} customers with their incoming messages`)
 
     const exportDateTime = formatDateTimeForExport(new Date().toISOString())
+
+    const tableRows = sortedConversations
+      .map((conv: any) => {
+        // دمج جميع الرسائل في نص واحد، كل رسالة في سطر منفصل مع التاريخ والوقت
+        const messagesText = conv.messages
+          .map((msg: any) => {
+            const { date, time } = formatDateTimeForExport(msg.timestamp)
+            return `${date} - ${time}: ${msg.text}`
+          })
+          .join("<br>")
+
+        const { date: lastDate, time: lastTime } = formatDateTimeForExport(conv.latest_timestamp)
+
+        return `
+        <tr>
+          <td>${conv.contact_name}</td>
+          <td>${conv.phone_number}</td>
+          <td style="text-align: right; line-height: 1.8;">${messagesText}</td>
+          <td>${lastDate}</td>
+          <td>${lastTime}</td>
+          <td>${conv.latest_status === "unread" ? `<span class="unread-badge">غير مقروء</span>` : "مقروء"}</td>
+        </tr>
+      `
+      })
+      .join("")
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -406,6 +444,7 @@ export async function POST(request: NextRequest) {
       padding: 12px;
       border-bottom: 1px solid #e0e0e0;
       text-align: right;
+      vertical-align: top;
     }
     tr:last-child td {
       border-bottom: none;
@@ -433,14 +472,16 @@ export async function POST(request: NextRequest) {
       .header { background: #00a884 !important; -webkit-print-color-adjust: exact; }
       th { background: #202c33 !important; -webkit-print-color-adjust: exact; }
       .unread-badge { background: #25d366 !important; -webkit-print-color-adjust: exact; }
+      tr { page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>تقرير الرسائل الواردة المحددة من العملاء</h1>
+    <h1>تقرير الرسائل الواردة من العملاء</h1>
     <p>تاريخ التصدير: ${exportDateTime.date} - ${exportDateTime.time} (توقيت مكة المكرمة)</p>
-    <p>عدد الرسائل: ${conversations.length}</p>
+    <p>عدد الرسائل: ${filteredIncoming.length}</p>
+    <p>عدد العملاء: ${sortedConversations.length}</p>
   </div>
   
   <table>
@@ -450,31 +491,17 @@ export async function POST(request: NextRequest) {
         <th>رقم الجوال</th>
         <th>نص الرسالة الواردة</th>
         <th>التاريخ</th>
-        <th>التوقيت</th>
+        <th>الوقت</th>
         <th>الحالة</th>
       </tr>
     </thead>
     <tbody>
-      ${conversations
-        .map((conv: any) => {
-          const { date, time } = formatDateTimeForExport(conv.last_message_time)
-          return `
-        <tr>
-          <td>${conv.contact_name}</td>
-          <td>${conv.phone_number}</td>
-          <td>${conv.last_message_text}</td>
-          <td>${date}</td>
-          <td>${time}</td>
-          <td>${conv.unread_count > 0 ? `<span class="unread-badge">غير مقروء</span>` : "مقروء"}</td>
-        </tr>
-      `
-        })
-        .join("")}
+      ${tableRows}
     </tbody>
   </table>
   
   <div class="footer">
-    <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء فقط</p>
+    <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء</p>
     <p>جميع الأوقات بتوقيت مكة المكرمة (UTC+3) - مرتبة من الأقدم إلى الأحدث</p>
   </div>
 </body>
