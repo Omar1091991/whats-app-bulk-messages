@@ -285,8 +285,25 @@ export function WhatsAppInbox() {
   }
 
   const formatTimestamp = (timestamp: number | string) => {
-    // تحويل timestamp إلى Date object
-    const date = typeof timestamp === "number" ? new Date(timestamp * 1000) : new Date(timestamp)
+    let date: Date
+
+    if (typeof timestamp === "number") {
+      // إذا كان الرقم صغيراً جداً (أقل من 10 مليار)، فهو بالـ seconds
+      // وإلا فهو بالـ milliseconds
+      if (timestamp < 10000000000) {
+        date = new Date(timestamp * 1000)
+      } else {
+        date = new Date(timestamp)
+      }
+    } else {
+      date = new Date(timestamp)
+    }
+
+    // التحقق من صحة التاريخ
+    if (isNaN(date.getTime())) {
+      console.warn("[v0] Invalid timestamp:", timestamp)
+      return "غير متوفر"
+    }
 
     // تحويل التاريخ إلى توقيت مكة المكرمة (UTC+3)
     const meccaTime = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Riyadh" }))

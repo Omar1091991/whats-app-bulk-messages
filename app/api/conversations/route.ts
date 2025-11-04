@@ -233,6 +233,16 @@ async function buildConversationsDynamically(supabaseClient: any, limit: number 
 
         console.log(`[v0] Built ${allConversations.length} conversations`)
 
+        if (allConversations.length > 0) {
+          console.log("[v0] Sample conversations with last_message_time:")
+          allConversations.slice(0, 3).forEach((conv, idx) => {
+            console.log(`[v0] Conversation ${idx + 1}: ${conv.contact_name} (${conv.phone_number})`)
+            console.log(`[v0]   last_message_time: ${conv.last_message_time}`)
+            console.log(`[v0]   last_message_text: ${conv.last_message_text?.substring(0, 50)}...`)
+            console.log(`[v0]   last_message_is_outgoing: ${conv.last_message_is_outgoing}`)
+          })
+        }
+
         conversationsCache = {
           data: allConversations,
           timestamp: now,

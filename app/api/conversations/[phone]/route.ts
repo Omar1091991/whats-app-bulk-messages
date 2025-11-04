@@ -130,7 +130,7 @@ export async function GET(request: Request, { params }: { params: { phone: strin
     ].sort((a, b) => {
       const timeA = new Date(a.timestamp).getTime()
       const timeB = new Date(b.timestamp).getTime()
-      return timeB - timeA // ترتيب تنازلي (الأحدث أولاً)
+      return timeA - timeB // ترتيب تصاعدي (الأقدم أولاً)
     })
 
     console.log("[v0] Total messages in conversation:", allMessages.length)

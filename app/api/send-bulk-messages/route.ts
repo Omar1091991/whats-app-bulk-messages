@@ -16,14 +16,14 @@ async function sendMessageBatch(
   finalMediaId: string | null,
   finalImageUrl: string | null,
   supabaseClient: any,
-  onProgress: (sent: number, failed: number) => void,
+  onProgress: (sent: number, failed: number, currentPhone?: string) => void,
 ) {
   const url = getWhatsAppApiUrl(`${settings.phone_number_id}/messages`)
   const results = []
   let successCount = 0
   let failureCount = 0
 
-  const BATCH_SIZE = 10
+  const BATCH_SIZE = 5
   for (let i = 0; i < phoneNumbers.length; i += BATCH_SIZE) {
     const batch = phoneNumbers.slice(i, i + BATCH_SIZE)
 
@@ -127,10 +127,10 @@ async function sendMessageBatch(
     successCount += batchSuccess
     failureCount += batchFailed
 
-    onProgress(successCount, failureCount)
+    onProgress(successCount, failureCount, phoneNumbers[i + BATCH_SIZE - 1])
 
     if (i + BATCH_SIZE < phoneNumbers.length) {
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      await new Promise((resolve) => setTimeout(resolve, 300))
     }
   }
 
@@ -169,8 +169,6 @@ export async function POST(request: Request) {
       rateLimitsData.remaining = 1000
       rateLimitsData.used = 0
     }
-
-    // المستخدم مسؤول عن إدارة حدود Meta
 
     console.log("[v0] جاري جلب إعدادات API...")
     const { data: settingsData, error: settingsError } = await supabaseClient.from("api_settings").select("*").limit(1)
@@ -290,8 +288,7 @@ export async function POST(request: Request) {
       finalMediaId,
       finalImageUrl,
       supabaseClient,
-      (sent, failed) => {
-        // يمكن إضافة streaming response هنا في المستقبل
+      (sent, failed, currentPhone) => {
         console.log(`[v0] التقدم: ${sent} ناجح، ${failed} فاشل`)
       },
     )
