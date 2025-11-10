@@ -8,45 +8,55 @@ export async function GET(request: NextRequest) {
 
     const supabaseClient = await createClient()
 
-    console.log("[v0] Exporting incoming messages only from webhook_messages table")
+    console.log("[v0] Exporting conversations with newest first ordering")
 
-    // جلب جميع الرسائل الواردة من webhook_messages فقط
     const { data: incomingMessages, error } = await supabaseClient
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
-      .order("timestamp", { ascending: false })
+      .order("timestamp", { ascending: false }) // من الأحدث إلى الأقدم
 
     if (error) {
       console.error("[v0] Error fetching incoming messages:", error)
       return NextResponse.json({ error: "فشل في جلب الرسائل الواردة" }, { status: 500 })
     }
 
-    console.log(`[v0] Fetched ${incomingMessages?.length || 0} incoming messages for export`)
+    const conversationsMap = new Map<string, any>()
 
-    // تطبيق الفلتر على الرسائل الواردة
-    let filteredMessages = incomingMessages || []
+    incomingMessages?.forEach((msg: any) => {
+      const existing = conversationsMap.get(msg.from_number)
+      if (!existing) {
+        conversationsMap.set(msg.from_number, {
+          from_number: msg.from_number,
+          from_name: msg.from_name,
+          last_message_text: msg.message_text,
+          last_message_time: msg.timestamp, // آخر رسالة واردة
+          status: msg.status,
+          replied: msg.replied,
+        })
+      }
+    })
+
+    let filteredConversations = Array.from(conversationsMap.values())
 
     if (filter === "unread") {
-      filteredMessages = filteredMessages.filter((msg) => msg.status === "unread")
-    } else if (filter === "conversations") {
-      // جميع الرسائل الواردة
-      filteredMessages = filteredMessages
+      filteredConversations = filteredConversations.filter((conv) => conv.status === "unread")
     }
 
-    console.log(`[v0] Exporting ${filteredMessages.length} incoming messages after filter: ${filter}`)
+    console.log(`[v0] Exporting ${filteredConversations.length} conversations after filter: ${filter}`)
 
-    // إنشاء محتوى Excel بصيغة CSV
-    const headers = ["رقم الهاتف", "اسم جهة الاتصال", "نص الرسالة", "وقت الرسالة", "الحالة", "تم الرد"]
+    const headers = ["رقم الهاتف", "اسم جهة الاتصال", "آخر رسالة", "وقت آخر رسالة واردة", "الحالة", "تم الرد"]
     const csvContent = [
       headers.join(","),
-      ...filteredMessages.map((msg: any) => {
-        const messageTime = new Date(msg.timestamp).toLocaleString("ar-SA")
-        const status = msg.status === "unread" ? "غير مقروء" : "مقروء"
-        const replied = msg.replied ? "نعم" : "لا"
+      ...filteredConversations.map((conv: any) => {
+        const messageTime = new Date(conv.last_message_time).toLocaleString("ar-SA", {
+          timeZone: "Asia/Riyadh",
+        })
+        const status = conv.status === "unread" ? "غير مقروء" : "مقروء"
+        const replied = conv.replied ? "نعم" : "لا"
         return [
-          msg.from_number,
-          `"${msg.from_name || msg.from_number}"`,
-          `"${msg.message_text || ""}"`,
+          conv.from_number,
+          `"${conv.from_name || conv.from_number}"`,
+          `"${conv.last_message_text || ""}"`,
           messageTime,
           status,
           replied,
@@ -54,14 +64,13 @@ export async function GET(request: NextRequest) {
       }),
     ].join("\n")
 
-    // إضافة BOM لدعم UTF-8 في Excel
     const bom = "\uFEFF"
     const csvWithBom = bom + csvContent
 
     return new NextResponse(csvWithBom, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="incoming-messages-${new Date().toISOString().split("T")[0]}.csv"`,
+        "Content-Disposition": `attachment; filename="conversations-${new Date().toISOString().split("T")[0]}.csv"`,
       },
     })
   } catch (error) {
@@ -80,34 +89,52 @@ export async function POST(request: NextRequest) {
 
     const supabaseClient = await createClient()
 
-    console.log(`[v0] Exporting incoming messages only for ${phoneNumbers.length} selected phone numbers`)
+    console.log(`[v0] Exporting ${phoneNumbers.length} selected conversations`)
 
-    // جلب جميع الرسائل الواردة من الأرقام المحددة
     const { data: incomingMessages, error } = await supabaseClient
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
       .in("from_number", phoneNumbers)
-      .order("timestamp", { ascending: false })
+      .order("timestamp", { ascending: false }) // من الأحدث إلى الأقدم
 
     if (error) {
       console.error("[v0] Error fetching incoming messages:", error)
       return NextResponse.json({ error: "فشل في جلب الرسائل الواردة" }, { status: 500 })
     }
 
-    console.log(`[v0] Fetched ${incomingMessages?.length || 0} incoming messages for selected phone numbers`)
+    const conversationsMap = new Map<string, any>()
 
-    // إنشاء محتوى Excel بصيغة CSV
-    const headers = ["رقم الهاتف", "اسم جهة الاتصال", "نص الرسالة", "وقت الرسالة", "الحالة", "تم الرد"]
+    incomingMessages?.forEach((msg: any) => {
+      const existing = conversationsMap.get(msg.from_number)
+      if (!existing) {
+        conversationsMap.set(msg.from_number, {
+          from_number: msg.from_number,
+          from_name: msg.from_name,
+          last_message_text: msg.message_text,
+          last_message_time: msg.timestamp, // آخر رسالة واردة
+          status: msg.status,
+          replied: msg.replied,
+        })
+      }
+    })
+
+    const selectedConversations = Array.from(conversationsMap.values())
+
+    console.log(`[v0] Exporting ${selectedConversations.length} selected conversations`)
+
+    const headers = ["رقم الهاتف", "اسم جهة الاتصال", "آخر رسالة", "وقت آخر رسالة واردة", "الحالة", "تم الرد"]
     const csvContent = [
       headers.join(","),
-      ...(incomingMessages || []).map((msg: any) => {
-        const messageTime = new Date(msg.timestamp).toLocaleString("ar-SA")
-        const status = msg.status === "unread" ? "غير مقروء" : "مقروء"
-        const replied = msg.replied ? "نعم" : "لا"
+      ...selectedConversations.map((conv: any) => {
+        const messageTime = new Date(conv.last_message_time).toLocaleString("ar-SA", {
+          timeZone: "Asia/Riyadh",
+        })
+        const status = conv.status === "unread" ? "غير مقروء" : "مقروء"
+        const replied = conv.replied ? "نعم" : "لا"
         return [
-          msg.from_number,
-          `"${msg.from_name || msg.from_number}"`,
-          `"${msg.message_text || ""}"`,
+          conv.from_number,
+          `"${conv.from_name || conv.from_number}"`,
+          `"${conv.last_message_text || ""}"`,
           messageTime,
           status,
           replied,
@@ -115,14 +142,13 @@ export async function POST(request: NextRequest) {
       }),
     ].join("\n")
 
-    // إضافة BOM لدعم UTF-8 في Excel
     const bom = "\uFEFF"
     const csvWithBom = bom + csvContent
 
     return new NextResponse(csvWithBom, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="selected-incoming-messages-${new Date().toISOString().split("T")[0]}.csv"`,
+        "Content-Disposition": `attachment; filename="selected-conversations-${new Date().toISOString().split("T")[0]}.csv"`,
       },
     })
   } catch (error) {

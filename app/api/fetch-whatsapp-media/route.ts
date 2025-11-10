@@ -27,10 +27,7 @@ export async function GET(request: NextRequest) {
         },
       })
     } catch (fetchError) {
-      console.log(
-        `[v0] Network error fetching media info for ${mediaId}:`,
-        fetchError instanceof Error ? fetchError.message : "Unknown error",
-      )
+      // خطأ في الشبكة - لا نسجله لأنه قد يكون media منتهي الصلاحية
       return NextResponse.json(
         {
           error: "Network error",
@@ -43,18 +40,18 @@ export async function GET(request: NextRequest) {
     if (!mediaInfoResponse.ok) {
       const errorData = await mediaInfoResponse.json()
 
-      // Check if it's an expired/invalid media error
       if (errorData.error?.code === 100 && errorData.error?.error_subcode === 33) {
-        console.log(`[v0] Media expired or unavailable: ${mediaId}`)
+        // media منتهي الصلاحية - لا نسجل خطأ لأنه متوقع
         return NextResponse.json(
           {
             error: "Media expired",
             expired: true,
           },
           { status: 410 },
-        ) // 410 Gone status for expired resources
+        )
       }
 
+      // خطأ آخر - نسجله
       console.log(`[v0] Failed to fetch media info for ${mediaId}:`, errorData.error?.message || "Unknown error")
       return NextResponse.json({ error: "Failed to fetch media info", expired: true }, { status: 410 })
     }
@@ -63,7 +60,6 @@ export async function GET(request: NextRequest) {
     const mediaUrl = mediaInfo.url
 
     if (!mediaUrl) {
-      console.log(`[v0] Media URL not found for ${mediaId}`)
       return NextResponse.json({ error: "Media URL not found", expired: true }, { status: 410 })
     }
 
@@ -74,7 +70,6 @@ export async function GET(request: NextRequest) {
     })
 
     if (!imageResponse.ok) {
-      console.log(`[v0] Failed to download image for ${mediaId}:`, imageResponse.status)
       return NextResponse.json({ error: "Failed to download image", expired: true }, { status: 410 })
     }
 
@@ -85,6 +80,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ dataUrl, mimeType })
   } catch (error) {
+    // خطأ غير متوقع - نسجله
     console.log("[v0] Error fetching WhatsApp media:", error instanceof Error ? error.message : "Unknown error")
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to fetch media", expired: true },

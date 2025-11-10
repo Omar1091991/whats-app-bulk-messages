@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -114,10 +116,11 @@ export function WhatsAppInbox() {
   const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set())
   const [isExporting, setIsExporting] = useState(false)
   const [isExportMode, setIsExportMode] = useState(false)
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number>(-1)
 
   const { data: conversationsData, mutate: mutateConversations } = useSWR(`/api/conversations`, fetcher, {
-    refreshInterval: 60000, // زيادة من 10 ثوانٍ إلى 60 ثانية
-    dedupingInterval: 30000, // زيادة من 5 ثوانٍ إلى 30 ثانية
+    refreshInterval: 3000, // تقليل من 5 ثوانٍ إلى 3 ثوانٍ للتحديث الأسرع
+    dedupingInterval: 1000, // تقليل من 2 ثانية إلى 1 ثانية
     revalidateOnFocus: true,
     revalidateOnReconnect: true,
   })
@@ -139,8 +142,8 @@ export function WhatsAppInbox() {
       : null,
     fetcher,
     {
-      refreshInterval: 60000, // زيادة من 10 ثوانٍ إلى 60 ثانية
-      dedupingInterval: 30000, // زيادة من 5 ثوانٍ إلى 30 ثانية
+      refreshInterval: 3000, // تقليل من 5 ثوانٍ إلى 3 ثوانٍ للتحديث الأسرع
+      dedupingInterval: 1000, // تقليل من 2 ثانية إلى 1 ثانية
       revalidateOnFocus: true,
     },
   )
@@ -485,7 +488,7 @@ export function WhatsAppInbox() {
               const updatedConversations = [...prevConversations]
               const existingConv = updatedConversations[existingIndex]
 
-              updatedConversations[existingIndex] = {
+              const updatedConv = {
                 ...existingConv,
                 last_message_text: messageText,
                 last_message_time: timestamp,
@@ -494,11 +497,21 @@ export function WhatsAppInbox() {
                 unread_count: (existingConv.unread_count || 0) + 1,
                 has_incoming_messages: true,
                 last_message_is_outgoing: false,
+                is_read: false, // التأكد من أن is_read = false
               }
 
               // نقل المحادثة إلى الأعلى
-              const [updated] = updatedConversations.splice(existingIndex, 1)
-              return [updated, ...updatedConversations]
+              updatedConversations.splice(existingIndex, 1)
+              const newConversations = [updatedConv, ...updatedConversations]
+
+              console.log("[v0] Updated existing conversation:", {
+                phone: phoneNumber,
+                unread_count: updatedConv.unread_count,
+                is_read: updatedConv.is_read,
+                has_incoming_messages: updatedConv.has_incoming_messages,
+              })
+
+              return newConversations
             } else {
               // إنشاء محادثة جديدة
               const newConversation: Conversation = {
@@ -511,10 +524,17 @@ export function WhatsAppInbox() {
                 last_incoming_message_text: messageText,
                 has_incoming_messages: true,
                 has_replies: false,
-                is_read: false,
+                is_read: false, // التأكد من أن is_read = false
                 has_replied: false,
                 last_message_is_outgoing: false,
               }
+
+              console.log("[v0] Created new conversation:", {
+                phone: phoneNumber,
+                unread_count: newConversation.unread_count,
+                is_read: newConversation.is_read,
+                has_incoming_messages: newConversation.has_incoming_messages,
+              })
 
               return [newConversation, ...prevConversations]
             }
@@ -526,9 +546,7 @@ export function WhatsAppInbox() {
             description: `من ${contactName}`,
           })
 
-          setTimeout(() => {
-            mutateConversations(undefined, { revalidate: true })
-          }, 3000)
+          mutateConversations()
         },
       )
       .subscribe((status) => {
@@ -560,27 +578,26 @@ export function WhatsAppInbox() {
               const updatedConversations = [...prevConversations]
               const existingConv = updatedConversations[existingIndex]
 
-              updatedConversations[existingIndex] = {
+              const updatedConv = {
                 ...existingConv,
                 last_message_text: messageText,
                 last_message_time: timestamp,
                 last_activity: timestamp,
                 has_replied: true,
                 unread_count: 0, // تصفير العداد عند الرد
+                is_read: true, // تعيين is_read = true عند الرد
                 last_message_is_outgoing: true,
               }
 
               // نقل المحادثة إلى الأعلى
-              const [updated] = updatedConversations.splice(existingIndex, 1)
-              return [updated, ...updatedConversations]
+              updatedConversations.splice(existingIndex, 1)
+              return [updatedConv, ...updatedConversations]
             }
 
             return prevConversations
           })
 
-          setTimeout(() => {
-            mutateConversations(undefined, { revalidate: true })
-          }, 3000)
+          mutateConversations()
         },
       )
       .subscribe((status) => {
@@ -686,31 +703,40 @@ export function WhatsAppInbox() {
     }
   }
 
-  const toggleSelectConversation = (phoneNumber: string) => {
-    setSelectedConversations((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(phoneNumber)) {
-        newSet.delete(phoneNumber)
-      } else {
-        newSet.add(phoneNumber)
-      }
-      return newSet
-    })
-  }
+  const toggleSelectConversation = (phoneNumber: string, index: number, event?: React.MouseEvent) => {
+    if (event?.shiftKey && lastSelectedIndex !== -1 && index !== lastSelectedIndex) {
+      // Shift+Click: تحديد نطاق من المحادثات
+      const start = Math.min(lastSelectedIndex, index)
+      const end = Math.max(lastSelectedIndex, index)
 
-  const toggleSelectAll = () => {
-    if (!displayedConversations || displayedConversations.length === 0) return
-
-    if (selectedConversations.size === displayedConversations.length) {
-      setSelectedConversations(new Set())
+      setSelectedConversations((prev) => {
+        const newSet = new Set(prev)
+        for (let i = start; i <= end; i++) {
+          if (displayedConversations[i]) {
+            newSet.add(displayedConversations[i].phone_number)
+          }
+        }
+        return newSet
+      })
     } else {
-      setSelectedConversations(new Set(displayedConversations.map((c) => c.phone_number)))
+      // Click عادي: تبديل تحديد محادثة واحدة
+      setSelectedConversations((prev) => {
+        const newSet = new Set(prev)
+        if (newSet.has(phoneNumber)) {
+          newSet.delete(phoneNumber)
+        } else {
+          newSet.add(phoneNumber)
+        }
+        return newSet
+      })
+      setLastSelectedIndex(index)
     }
   }
 
   const cancelExportMode = () => {
     setIsExportMode(false)
     setSelectedConversations(new Set())
+    setLastSelectedIndex(-1)
   }
 
   const enterExportMode = () => {
@@ -890,6 +916,15 @@ export function WhatsAppInbox() {
     }
   }
 
+  const toggleSelectAll = () => {
+    if (selectedConversations.size === displayedConversations.length) {
+      setSelectedConversations(new Set())
+    } else {
+      const newSet = new Set(displayedConversations.map((conv) => conv.phone_number))
+      setSelectedConversations(newSet)
+    }
+  }
+
   useEffect(() => {
     setDisplayedAllCount(CONVERSATIONS_PER_PAGE)
   }, [activeFilter])
@@ -1001,7 +1036,7 @@ export function WhatsAppInbox() {
                   document.getElementById("export-dropdown")?.classList.add("hidden")
                 }}
                 disabled={isExporting}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors disabled:opacity-50 border-b border-[#2a3942]"
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-white hover:bg-[#2a3942] text-sm transition-colors border-b border-[#2a3942]"
               >
                 <CheckSquare className="h-4 w-4 text-[#00a884]" />
                 <span>تحديد محادثات</span>
@@ -1175,7 +1210,7 @@ export function WhatsAppInbox() {
                 </div>
               )}
 
-              {displayedConversations.map((conversation) => (
+              {displayedConversations.map((conversation, index) => (
                 <div
                   key={conversation.phone_number}
                   className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 cursor-pointer hover:bg-[#202c33] transition-colors ${
@@ -1186,7 +1221,7 @@ export function WhatsAppInbox() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        toggleSelectConversation(conversation.phone_number)
+                        toggleSelectConversation(conversation.phone_number, index, e)
                       }}
                       className="flex-shrink-0 text-white hover:text-[#00a884] transition-colors"
                     >

@@ -356,7 +356,7 @@ export function BulkMessageForm() {
 
       if (sendMode === "now") {
         const totalMessages = phoneNumbers.length
-        const estimatedTimePerMessage = 0.4 // ثانية لكل رسالة (تقدير محسّن)
+        const estimatedTimePerMessage = 0.4
         const totalEstimatedTime = totalMessages * estimatedTimePerMessage * 1000
         const startTime = Date.now()
 
@@ -1126,6 +1126,7 @@ export function BulkMessageForm() {
                     </span>
                     <span className="text-3xl font-bold text-red-600">{failedMessageCount}</span>
                   </div>
+                  <p className="text-xs text-red-700 mt-2">تم تخطي الرسائل الفاشلة وإكمال الإرسال للأرقام الأخرى</p>
                 </div>
               )}
 

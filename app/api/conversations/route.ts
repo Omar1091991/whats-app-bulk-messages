@@ -8,7 +8,7 @@ let conversationsCache: {
   timestamp: number
 } | null = null
 
-const CACHE_DURATION = 60000 // تقليل cache من 5 دقائق إلى 1 دقيقة لضمان تحديث البيانات بشكل أسرع
+const CACHE_DURATION = 2000 // تقليل cache من 10 ثوانٍ إلى 2 ثانية فقط للتحديث الفوري
 
 function normalizePhoneNumber(phone: string): string {
   return phone.replace(/\D/g, "")
