@@ -755,7 +755,11 @@ export function WhatsAppInbox() {
 
     setIsExporting(true)
     try {
-      const phoneNumbers = Array.from(selectedConversations)
+      const phoneNumbers = displayedConversations
+        .filter((conv) => selectedConversations.has(conv.phone_number))
+        .map((conv) => conv.phone_number)
+        .reverse() // عكس الترتيب
+
       const url = `/api/conversations/export-excel`
       const response = await fetch(url, {
         method: "POST",
@@ -871,7 +875,11 @@ export function WhatsAppInbox() {
 
     setIsExporting(true)
     try {
-      const phoneNumbers = Array.from(selectedConversations)
+      const phoneNumbers = displayedConversations
+        .filter((conv) => selectedConversations.has(conv.phone_number))
+        .map((conv) => conv.phone_number)
+        .reverse() // عكس الترتيب
+
       const url = `/api/conversations/export-pdf`
       const response = await fetch(url, {
         method: "POST",

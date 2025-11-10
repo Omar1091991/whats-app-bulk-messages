@@ -267,7 +267,6 @@ export async function POST(request: NextRequest) {
     const { data: allIncoming, error: allError } = await supabaseClient
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
-      .order("timestamp", { ascending: true })
       .limit(10)
 
     if (allError) throw allError
@@ -294,7 +293,6 @@ export async function POST(request: NextRequest) {
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
       .in("from_number", phoneVariants)
-      .order("timestamp", { ascending: true })
 
     if (incomingError) throw incomingError
 
@@ -307,7 +305,6 @@ export async function POST(request: NextRequest) {
       const { data: allMessages, error: allMessagesError } = await supabaseClient
         .from("webhook_messages")
         .select("from_number, from_name, message_text, timestamp, replied, status")
-        .order("timestamp", { ascending: true })
 
       if (allMessagesError) throw allMessagesError
 
@@ -361,12 +358,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ترتيب العملاء حسب آخر رسالة من الأقدم إلى الأحدث
-    const sortedConversations = Array.from(messagesByPhone.values()).sort(
-      (a, b) => new Date(a.latest_timestamp).getTime() - new Date(b.latest_timestamp).getTime(),
-    )
+    const sortedConversations = phoneNumbers
+      .map((phone) => {
+        const normalized = normalizePhoneNumber(phone)
+        return messagesByPhone.get(normalized)
+      })
+      .filter((conv) => conv !== undefined)
 
-    console.log(`[v0] Exporting ${sortedConversations.length} customers with their incoming messages`)
+    console.log(
+      `[v0] Exporting ${sortedConversations.length} customers with their incoming messages in specified order`,
+    )
 
     const exportDateTime = formatDateTimeForExport(new Date().toISOString())
 
@@ -502,7 +503,7 @@ export async function POST(request: NextRequest) {
   
   <div class="footer">
     <p>تم إنشاء هذا التقرير بواسطة نظام إدارة رسائل واتساب - الرسائل الواردة من العملاء</p>
-    <p>جميع الأوقات بتوقيت مكة المكرمة (UTC+3) - مرتبة من الأقدم إلى الأحدث</p>
+    <p>جميع الأوقات بتوقيت مكة المكرمة (UTC+3) - مرتبة حسب التحديد</p>
   </div>
 </body>
 </html>

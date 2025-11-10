@@ -89,13 +89,12 @@ export async function POST(request: NextRequest) {
 
     const supabaseClient = await createClient()
 
-    console.log(`[v0] Exporting ${phoneNumbers.length} selected conversations`)
+    console.log(`[v0] Exporting ${phoneNumbers.length} selected conversations in specified order`)
 
     const { data: incomingMessages, error } = await supabaseClient
       .from("webhook_messages")
       .select("from_number, from_name, message_text, timestamp, replied, status")
       .in("from_number", phoneNumbers)
-      .order("timestamp", { ascending: false }) // من الأحدث إلى الأقدم
 
     if (error) {
       console.error("[v0] Error fetching incoming messages:", error)
@@ -111,16 +110,18 @@ export async function POST(request: NextRequest) {
           from_number: msg.from_number,
           from_name: msg.from_name,
           last_message_text: msg.message_text,
-          last_message_time: msg.timestamp, // آخر رسالة واردة
+          last_message_time: msg.timestamp,
           status: msg.status,
           replied: msg.replied,
         })
       }
     })
 
-    const selectedConversations = Array.from(conversationsMap.values())
+    const selectedConversations = phoneNumbers
+      .map((phone) => conversationsMap.get(phone))
+      .filter((conv) => conv !== undefined)
 
-    console.log(`[v0] Exporting ${selectedConversations.length} selected conversations`)
+    console.log(`[v0] Exporting ${selectedConversations.length} selected conversations with preserved order`)
 
     const headers = ["رقم الهاتف", "اسم جهة الاتصال", "آخر رسالة", "وقت آخر رسالة واردة", "الحالة", "تم الرد"]
     const csvContent = [
